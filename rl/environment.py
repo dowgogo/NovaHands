@@ -1,5 +1,5 @@
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 from typing import Dict, Any, Optional
 from skills.skill_manager import SkillManager
 import logging
