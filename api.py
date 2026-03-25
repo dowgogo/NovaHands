@@ -106,7 +106,9 @@ async def execute(request: ExecuteRequest):
 
     async with _execute_lock:
         try:
-            loop = asyncio.get_event_loop()
+            # Bug fix: get_event_loop() 在 Python 3.10+ Deprecated，3.12 移除
+            # 在 async 上下文中应使用 get_running_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(
                 None,
                 lambda: executor.execute(request.command, controller, **request.context)

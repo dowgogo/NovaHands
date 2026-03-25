@@ -56,7 +56,6 @@ class SkillCall(BaseModel):
     @classmethod
     def skill_must_be_simple(cls, v: str) -> str:
         """技能名只允许字母、数字、下划线，防止注入"""
-        import re
         if not re.match(r'^[\w\-]+$', v):
             raise ValueError(f"Invalid skill name: '{v}'")
         return v.strip()
@@ -105,16 +104,25 @@ class NLExecutor:
             return self._fallback_execution(user_input, controller, **context)
 
     def _extract_json(self, text: str) -> str:
+        """从 LLM 输出中提取 JSON 字符串。
+
+        优先处理 ```json ... ``` 和 ``` ... ``` 代码块。
+        若结束标记缺失（响应被截断），抛出 ValueError 触发 fallback，
+        而非 silently 退化为解析整段文本（原行为可能引发 ValidationError 误报）。
+        """
         if "```json" in text:
             start = text.find("```json") + 7
             end = text.find("```", start)
-            if end != -1:
-                return text[start:end].strip()
-        elif "```" in text:
+            if end == -1:
+                # Bug fix: 结束标记缺失（截断响应），主动抛出而非静默降级
+                raise ValueError("Truncated LLM response: opening ```json found but closing ``` missing")
+            return text[start:end].strip()
+        if "```" in text:
             start = text.find("```") + 3
             end = text.find("```", start)
-            if end != -1:
-                return text[start:end].strip()
+            if end == -1:
+                raise ValueError("Truncated LLM response: opening ``` found but closing ``` missing")
+            return text[start:end].strip()
         return text.strip()
 
     def _fallback_execution(self, user_input: str, controller, **context) -> Optional[str]:
@@ -165,12 +173,14 @@ class NLExecutor:
         ])
         # 对 user_input 做简单转义，降低 Prompt Injection 风险
         safe_input = user_input.replace("```", "'''")
+        # Bug fix: context 可能为 None（调用方传入 None 时 json.dumps 会崩溃）
+        safe_context = context if context is not None else {}
         prompt = f"""你是一个智能助手，负责将用户指令转换为可执行的技能。
 可用技能列表（只能从中选择，不得输出列表以外的技能名）：
 {skill_descriptions}
 
 当前上下文（仅供参考）：
-{json.dumps(context, ensure_ascii=False)}
+{json.dumps(safe_context, ensure_ascii=False)}
 
 用户指令：{safe_input}
 

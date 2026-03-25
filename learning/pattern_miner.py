@@ -31,7 +31,8 @@ class PatternMiner:
             y = action.details.get('y', 0)
             return f"click_{x}_{y}"
         elif action.type == "key_press":
-            key = action.details['key']
+            # Bug fix: 原代码用 details['key'] 直接索引，key 缺失会 KeyError
+            key = action.details.get('key', 'unknown')
             # Avoid recording actual letters for privacy
             if len(key) == 1 and key.isalpha():
                 key = "<LETTER>"

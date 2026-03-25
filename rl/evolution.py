@@ -1,5 +1,5 @@
 import os
-import time
+import uuid
 from learning.pattern_miner import PatternMiner
 from skills.skill_manager import SkillManager
 from learning.skill_generator import GeneratedSkill, SkillGenerator
@@ -39,8 +39,9 @@ class SkillEvolution:
 
         for pattern, support in patterns:
             if support >= 3:
-                # 名称加时间戳避免重名覆盖
-                skill_name = f"auto_{int(time.time())}_{len(self.skill_manager.skills)}"
+                # Bug fix: 原 int(time.time()) + len(skills) 在同一秒并发调用时可能重复
+                # 改用 uuid4 短哈希保证唯一性
+                skill_name = f"auto_{uuid.uuid4().hex[:8]}"
                 skill = GeneratedSkill(
                     name=skill_name,
                     description=f"Auto-generated from pattern with support {support}",
