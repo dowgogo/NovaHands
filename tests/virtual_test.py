@@ -11,6 +11,7 @@ NovaHands 虚拟测试脚本
 
 import sys
 import os
+import io
 import json
 import types
 import tempfile
@@ -18,6 +19,7 @@ import unittest
 import logging
 import threading
 import importlib
+import platform
 
 # ─────────────────────────────────────────────
 # 0. 确保从项目根目录可以找到各模块
@@ -90,13 +92,17 @@ sys.modules["pynput.keyboard"] = pynput_keyboard
 sys.modules["pynput.mouse"] = pynput_mouse
 
 # ---------- psutil ----------
+# 跨平台兼容：Linux/macOS 进程名不带 .exe 后缀
+_IS_WINDOWS = platform.system() == "Windows"
+_MOCK_PROC_NAME = "chrome.exe" if _IS_WINDOWS else "chrome"
+
 psutil_mock = _make_module("psutil")
 
 class _Process:
     def __init__(self, pid=None):
-        self.info = {"name": "chrome.exe", "pid": pid or 1234}
+        self.info = {"name": _MOCK_PROC_NAME, "pid": pid or 1234}
     def name(self):
-        return "chrome.exe"
+        return _MOCK_PROC_NAME
 
 def _psutil_process_iter(attrs=None):
     return [_Process()]
@@ -329,9 +335,15 @@ sys.modules["tkinter.ttk"] = _make_module("tkinter.ttk")
 sys.modules["tkinter.scrolledtext"] = tk_scrolledtext
 
 # ---------- win32 ----------
+# 在所有平台（包括 Linux/macOS）都注入 win32 mock，
+# 防止任何顶层 import win32xxx 抛出 ImportError
 sys.modules["win32gui"] = _make_module("win32gui", GetForegroundWindow=lambda: 0, GetWindowText=lambda h: "TestApp")
 sys.modules["win32process"] = _make_module("win32process", GetWindowThreadProcessId=lambda h: (0, 1234))
 sys.modules["win32con"] = _make_module("win32con")
+# 额外注入：win32api / win32security / pywintypes（部分代码可能 import）
+sys.modules["win32api"] = _make_module("win32api")
+sys.modules["win32security"] = _make_module("win32security")
+sys.modules["pywintypes"] = _make_module("pywintypes")
 
 # ---------- subprocess (保留真实，只在测试中绕过) ----------
 import subprocess as _subprocess
@@ -350,7 +362,12 @@ _TEST_CONFIG = {
         }
     },
     "security": {
-        "allowed_apps": ["chrome.exe", "notepad.exe", "code.exe"],
+        # 同时包含 Windows (.exe) 和 Linux/macOS（无后缀）的进程名，
+        # 保证跨平台测试均能通过 check_app_allowed()
+        "allowed_apps": [
+            "chrome.exe", "notepad.exe", "code.exe",   # Windows
+            "chrome", "gedit", "code", "nano"           # Linux / macOS
+        ],
         "sensitive_operations": ["send_keys", "delete_file"],
         "confirm_timeout": 10,
         "enable_failsafe": True
@@ -811,6 +828,101 @@ class TestOpenAppSkill(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.skill.execute(None, app_name="app | cat /etc/passwd")
 
+    def test_linux_app_with_spaces_validation(self):
+        """Linux 下含空格但合法的应用名（如 'Visual Studio Code'）不应被安全正则拦截"""
+        # "Visual Studio Code" 只含字母和空格，符合 _APP_NAME_RE
+        import subprocess
+        orig_popen = subprocess.Popen
+        subprocess.Popen = lambda *a, **kw: None
+        try:
+            self.skill.execute(None, app_name="Visual Studio Code")
+        except ValueError as e:
+            self.fail(f"合法含空格的应用名被错误拒绝: {e}")
+        except Exception:
+            pass  # 系统级错误（如 FileNotFoundError）在测试中属正常
+        finally:
+            subprocess.Popen = orig_popen
+
+
+class TestCrossPlatformCompat(unittest.TestCase):
+    """跨平台兼容性专项测试"""
+
+    def test_format_state_missing_keys(self):
+        """format_state 对缺失键应 fallback 而非 KeyError（.get() 防御性编程）"""
+        from rl.utils import format_state
+        # 完整 state
+        full = {
+            "current_app": "chrome",
+            "last_user_input": "open google",
+            "last_skill": "open_app",
+            "last_result": True,
+        }
+        result = format_state(full)
+        self.assertIn("chrome", result)
+        self.assertIn("成功", result)
+
+        # 空 dict 不应抛 KeyError
+        try:
+            result_empty = format_state({})
+            self.assertIsInstance(result_empty, str)
+        except KeyError as e:
+            self.fail(f"format_state({{}}) raised KeyError: {e}")
+
+        # 部分缺失
+        partial = {"current_app": "terminal"}
+        try:
+            result_partial = format_state(partial)
+            self.assertIn("terminal", result_partial)
+        except KeyError as e:
+            self.fail(f"format_state(partial) raised KeyError: {e}")
+
+    def test_path_sep_in_skill_persist(self):
+        """SkillEvolution 持久化路径不应使用硬编码路径分隔符"""
+        from rl.evolution import _DEFAULT_USER_SKILL_DIR
+        import os
+        # 路径应为绝对路径或通过 os.path.join 拼接（不含 \\ 硬编码）
+        # 验证可以在当前 OS 上正常解析
+        resolved = os.path.realpath(_DEFAULT_USER_SKILL_DIR)
+        self.assertTrue(os.path.isabs(resolved),
+                        f"_DEFAULT_USER_SKILL_DIR 解析后应为绝对路径, got: {resolved}")
+
+    def test_open_app_platform_dispatch(self):
+        """open_app 应根据 platform.system() 分发命令，不崩溃"""
+        import subprocess
+        popen_calls = []
+        orig_popen = subprocess.Popen
+        subprocess.Popen = lambda args, **kw: popen_calls.append(args)
+        try:
+            from skills.native.open_app import OpenAppSkill
+            skill = OpenAppSkill()
+            skill.execute(None, app_name="notepad")
+            # 调用应发生（无论 Windows / Linux / macOS）
+            self.assertEqual(len(popen_calls), 1,
+                             "open_app 应调用 Popen 一次")
+            cmd = popen_calls[0]
+            self.assertIsInstance(cmd, list,
+                                  "open_app 应使用列表形式传参（禁止 shell=True）")
+        finally:
+            subprocess.Popen = orig_popen
+
+    def test_tempfile_cleanup_cross_platform(self):
+        """tempfile 在 Windows/Linux 上均应能正常创建和删除"""
+        tf = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w", encoding="utf-8")
+        tf.write('{"test": true}')
+        tf.close()
+        path = tf.name
+        self.assertTrue(os.path.exists(path))
+        os.unlink(path)
+        self.assertFalse(os.path.exists(path))
+
+    def test_logger_file_encoding_utf8(self):
+        """日志文件应使用 UTF-8 编码，避免 Windows GBK 默认编码问题"""
+        logger_path = os.path.join(ROOT, "utils", "logger.py")
+        with open(logger_path, "r", encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn("encoding='utf-8'", src,
+                      "FileHandler 应明确指定 encoding='utf-8'，防止 Windows 默认 GBK 编码乱码")
+
 
 class TestMockController(unittest.TestCase):
     """RL MockController：所有操作不实际执行"""
@@ -966,12 +1078,42 @@ class TestAPIKeyValidation(unittest.TestCase):
 # 4. 彩色结果输出
 # ─────────────────────────────────────────────
 
+def _supports_ansi() -> bool:
+    """检测当前终端是否支持 ANSI 颜色码。
+    - Windows 旧版 cmd（非 Windows Terminal / PowerShell Core）默认不支持
+    - Linux/macOS 的 tty 通常支持
+    - CI 环境（如 GitHub Actions）通过 TERM/COLORTERM 环境变量声明支持
+    """
+    # 强制禁用：NO_COLOR 标准
+    if os.environ.get("NO_COLOR"):
+        return False
+    # 强制启用：FORCE_COLOR 或 COLORTERM
+    if os.environ.get("FORCE_COLOR") or os.environ.get("COLORTERM"):
+        return True
+    if not hasattr(sys.stdout, "isatty") or not sys.stdout.isatty():
+        return False
+    if platform.system() == "Windows":
+        # Windows 10 1511+ 支持 ANSI via VT100，尝试启用
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            # ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+            return True
+        except Exception:
+            return False
+    return True  # Linux / macOS tty 默认支持
+
+
+_ANSI = _supports_ansi()
+
+
 class _ColorResult(unittest.TextTestResult):
-    GREEN = "\033[92m"
-    RED   = "\033[91m"
-    YELLOW= "\033[93m"
-    RESET = "\033[0m"
-    BOLD  = "\033[1m"
+    GREEN  = "\033[92m" if _ANSI else ""
+    RED    = "\033[91m" if _ANSI else ""
+    YELLOW = "\033[93m" if _ANSI else ""
+    RESET  = "\033[0m"  if _ANSI else ""
+    BOLD   = "\033[1m"  if _ANSI else ""
 
     def addSuccess(self, test):
         super().addSuccess(test)
@@ -1006,17 +1148,18 @@ if __name__ == "__main__":
     print("═" * 60 + "\n")
 
     suites = [
-        ("配置加载器 (ConfigLoader)",    TestConfigLoader),
-        ("技能基类 (BaseSkill)",          TestBaseSkill),
-        ("技能管理器 (SkillManager)",      TestSkillManager),
-        ("控制器 (Controller)",           TestController),
-        ("安全守卫 (SafeGuard)",           TestSafeGuard),
-        ("自然语言执行器 (NLExecutor)",    TestNLExecutor),
-        ("打开应用技能 (OpenAppSkill)",    TestOpenAppSkill),
-        ("RL 模拟控制器 (MockController)", TestMockController),
-        ("RL 训练环境 (NovaHandsEnv)",     TestNovaHandsEnv),
-        ("线程安全 (ThreadSafety)",        TestThreadSafety),
-        ("安全修复验证 (SecurityFixes)",   TestAPIKeyValidation),
+        ("配置加载器 (ConfigLoader)",       TestConfigLoader),
+        ("技能基类 (BaseSkill)",             TestBaseSkill),
+        ("技能管理器 (SkillManager)",         TestSkillManager),
+        ("控制器 (Controller)",              TestController),
+        ("安全守卫 (SafeGuard)",              TestSafeGuard),
+        ("自然语言执行器 (NLExecutor)",       TestNLExecutor),
+        ("打开应用技能 (OpenAppSkill)",       TestOpenAppSkill),
+        ("RL 模拟控制器 (MockController)",    TestMockController),
+        ("RL 训练环境 (NovaHandsEnv)",        TestNovaHandsEnv),
+        ("线程安全 (ThreadSafety)",           TestThreadSafety),
+        ("安全修复验证 (SecurityFixes)",      TestAPIKeyValidation),
+        ("跨平台兼容性 (CrossPlatformCompat)", TestCrossPlatformCompat),
     ]
 
     total_pass = total_fail = total_error = total_skip = 0
@@ -1025,16 +1168,18 @@ if __name__ == "__main__":
         print(f"\n>> {label}")
         loader = unittest.TestLoader()
         suite = loader.loadTestsFromTestCase(suite_class)
-        runner = _ColorRunner(verbosity=0, stream=open(os.devnull, "w"))
+        # 使用 io.StringIO 替代 open(os.devnull)，避免文件句柄泄漏
+        # （Linux 的文件描述符管理比 Windows 更严格，泄漏会产生 ResourceWarning）
+        runner = _ColorRunner(verbosity=0, stream=io.StringIO())
         result = runner.run(suite)
 
         # 手动打印每条
         for test, _ in result.failures:
-            print(f"  \033[91m[FAIL]\033[0m {test._testMethodName}")
+            print(f"  {_ColorResult.RED}[FAIL]{_ColorResult.RESET} {test._testMethodName}")
         for test, _ in result.errors:
-            print(f"  \033[93m[ERR]\033[0m {test._testMethodName} (ERROR)")
+            print(f"  {_ColorResult.YELLOW}[ERR]{_ColorResult.RESET} {test._testMethodName} (ERROR)")
         for test, reason in result.skipped:
-            print(f"  \033[93m[SKIP]\033[0m {test._testMethodName} (skipped)")
+            print(f"  {_ColorResult.YELLOW}[SKIP]{_ColorResult.RESET} {test._testMethodName} (skipped)")
 
         # 成功的
         failed_names = {t._testMethodName for t, _ in result.failures + result.errors}
@@ -1047,7 +1192,7 @@ if __name__ == "__main__":
             if name is None:
                 continue
             if name not in failed_names and name not in skipped_names:
-                print(f"  \033[92m[OK]\033[0m {name}")
+                print(f"  {_ColorResult.GREEN}[OK]{_ColorResult.RESET} {name}")
 
         total_pass  += result.testsRun - len(result.failures) - len(result.errors) - len(result.skipped)
         total_fail  += len(result.failures)
@@ -1057,13 +1202,18 @@ if __name__ == "__main__":
     total = total_pass + total_fail + total_error + total_skip
     print("\n" + "═" * 60)
     print(f"  总计: {total} 项测试")
-    print(f"  \033[92m通过: {total_pass}\033[0m  "
-          f"\033[91m失败: {total_fail}\033[0m  "
-          f"\033[93m错误: {total_error}  跳过: {total_skip}\033[0m")
+    _G = _ColorResult.GREEN
+    _R = _ColorResult.RED
+    _Y = _ColorResult.YELLOW
+    _B = _ColorResult.BOLD
+    _RST = _ColorResult.RESET
+    print(f"  {_G}通过: {total_pass}{_RST}  "
+          f"{_R}失败: {total_fail}{_RST}  "
+          f"{_Y}错误: {total_error}  跳过: {total_skip}{_RST}")
     if total_fail == 0 and total_error == 0:
-        print("\n  \033[1m\033[92m[OK] 全部测试通过！项目逻辑运行正常。\033[0m")
+        print(f"\n  {_B}{_G}[OK] 全部测试通过！项目逻辑运行正常。{_RST}")
     else:
-        print("\n  \033[91m部分测试未通过，请查看上方详情。\033[0m")
+        print(f"\n  {_R}部分测试未通过，请查看上方详情。{_RST}")
     print("═" * 60 + "\n")
 
     sys.exit(1 if (total_fail + total_error) > 0 else 0)

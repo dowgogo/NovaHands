@@ -1,6 +1,7 @@
 import subprocess
 import platform
 import re
+import shlex
 from ..base_skill import BaseSkill
 
 # 应用名合法性校验：只允许字母、数字、空格、连字符、下划线、点
@@ -32,7 +33,11 @@ class OpenAppSkill(BaseSkill):
             elif system == 'Darwin':
                 subprocess.Popen(['open', '-a', app_name])
             elif system == 'Linux':
-                subprocess.Popen([app_name])
+                # 跨平台修复：Linux 下应用名可能含空格（如 "Visual Studio Code"）
+                # 使用 shlex.split 将字符串拆成参数列表，避免 Popen 把空格误认为路径分隔符
+                # 注意：_APP_NAME_RE 已确保 app_name 无 shell 注入字符，shlex.split 是安全的
+                args = shlex.split(app_name)
+                subprocess.Popen(args)
             else:
                 raise NotImplementedError(f"Unsupported OS: {system}")
         except Exception as e:
