@@ -24,9 +24,13 @@ class ModelManager:
 
     def set_model(self, provider: str):
         with self._lock:
-            provider_config = self.config.get(f'llm.{provider}', {})
-            if not provider_config:
-                raise ValueError(f"Model config for {provider} not found")
+            # "none" 模式：无需 provider config
+            if provider != "none":
+                provider_config = self.config.get(f'llm.{provider}', {})
+                if not provider_config:
+                    raise ValueError(f"Model config for {provider} not found")
+            else:
+                provider_config = {}
 
             # 切换前释放旧模型的 GPU 资源
             if self.current_model is not None:
@@ -76,6 +80,11 @@ class ModelManager:
                     trust_remote_code=provider_config.get("trust_remote_code", False),
                     **provider_config.get("params", {})
                 )
+            elif provider == "none":
+                # 无模型模式：程序正常启动，NLExecutor 降级到关键词匹配
+                self.current_model = None
+                logger.info("No LLM configured (provider=none). NL execution will use keyword matching only.")
+                return
             else:
                 raise ValueError(f"Unknown model provider: {provider}")
             logger.info(f"Switched to model: {provider} - {self.current_model.model_name}")

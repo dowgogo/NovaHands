@@ -28,16 +28,8 @@ class LocalModel(BaseModel):
     ):
         super().__init__(model_name, **kwargs)
         self.device = device
-
-        # 懒导入：torch/transformers 是重量级依赖，仅在 LocalModel 实例化时加载
-        try:
-            import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-        except ImportError as e:
-            raise ImportError(
-                f"Local model requires torch and transformers: {e}\n"
-                "Run: pip install torch transformers"
-            ) from e
+        self.quantize_4bit = quantize_4bit
+        self.trust_remote_code = trust_remote_code
 
         # 安全修复：路径规范化，防止路径遍历
         raw_cache = cache_dir or os.path.join(
@@ -57,9 +49,31 @@ class LocalModel(BaseModel):
                 "Only use models from trusted sources."
             )
 
+        # 懒加载：__init__ 不下载/加载模型，首次 chat() 时才真正加载
+        # 这样程序启动不需要网络，也不会因为模型未下载而崩溃
+        self.tokenizer = None
+        self.model = None
+        self._torch = None
+        self._model_loaded = False
+        logger.info(f"LocalModel configured: {model_name} (lazy load, not yet downloaded)")
+
+    def _load_model(self):
+        """真正加载模型（懒加载，仅首次 chat() 时调用）"""
+        if self._model_loaded:
+            return
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        except ImportError as e:
+            raise ImportError(
+                f"Local model requires torch and transformers: {e}\n"
+                "Run: pip install torch transformers"
+            ) from e
+
+        self._torch = torch
         bnb_config = None
-        if quantize_4bit:
-            if device == "cuda":
+        if self.quantize_4bit:
+            if self.device == "cuda":
                 bnb_config = BitsAndBytesConfig(
                     load_in_4bit=True,
                     bnb_4bit_compute_dtype=torch.float16,
@@ -73,23 +87,24 @@ class LocalModel(BaseModel):
                     "Model will run in full precision and may use more memory."
                 )
 
+        logger.info(f"Loading local model: {self.model_name} (this may take a while...)")
         self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name,
+            self.model_name,
             cache_dir=self.cache_dir,
-            trust_remote_code=trust_remote_code
+            trust_remote_code=self.trust_remote_code
         )
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
+            self.model_name,
             quantization_config=bnb_config,
-            device_map=device,
-            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            device_map=self.device,
+            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
             cache_dir=self.cache_dir,
-            trust_remote_code=trust_remote_code,
+            trust_remote_code=self.trust_remote_code,
             low_cpu_mem_usage=True
         )
         self.model.eval()
-        self._torch = torch
-        logger.info(f"Loaded local model: {model_name} on {device}")
+        self._model_loaded = True
+        logger.info(f"Local model loaded: {self.model_name} on {self.device}")
 
     def _get_model_device(self):
         """安全获取模型所在设备（兼容 device_map='auto' 分片情况）"""
@@ -99,6 +114,8 @@ class LocalModel(BaseModel):
             return self._torch.device("cpu")
 
     def chat(self, messages: list, **kwargs) -> str:
+        # 懒加载：首次调用时才真正加载模型
+        self._load_model()
         # 优先使用 tokenizer 内置 chat_template（兼容多模型格式）
         if hasattr(self.tokenizer, "apply_chat_template"):
             try:
