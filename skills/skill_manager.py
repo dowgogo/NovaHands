@@ -49,6 +49,35 @@ class SkillManager:
     def list_skills(self) -> List[str]:
         return list(self.skills.keys())
 
+    def register_skill(self, skill: BaseSkill, overwrite: bool = False) -> bool:
+        """公开的技能注册接口。
+
+        Parameters
+        ----------
+        skill : BaseSkill
+            要注册的技能实例。
+        overwrite : bool
+            False（默认）：若同名技能已存在，跳过并返回 False。
+            True：强制覆盖已有技能。
+
+        Returns
+        -------
+        bool
+            True 表示注册成功，False 表示已存在且未覆盖。
+        """
+        if not isinstance(skill, BaseSkill):
+            raise TypeError(f"Expected BaseSkill instance, got {type(skill)}")
+        if not skill.name:
+            raise ValueError("Skill name cannot be empty")
+
+        if skill.name in self.skills and not overwrite:
+            logger.debug(f"Skill '{skill.name}' already registered, skipping (pass overwrite=True to force)")
+            return False
+
+        self.skills[skill.name] = skill
+        logger.info(f"Registered skill: {skill.name} (overwrite={overwrite})")
+        return True
+
     def execute_skill(self, name: str, controller, **kwargs):
         skill = self.get_skill(name)
         if not skill:

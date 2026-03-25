@@ -10,11 +10,22 @@ _DEFAULT_SAVE_PATH = Path.home() / ".novahands" / "rl_data.json"
 
 
 class DataCollector:
-    def __init__(self, env: NovaHandsEnv, policy: PolicyModel, save_path=None):
+    def __init__(
+        self,
+        env: NovaHandsEnv,
+        policy: PolicyModel,
+        save_path=None,
+        epsilon: float = 0.1,
+        train_frequency: int = 100,
+    ):
         self.env = env
         self.policy = policy
         self.save_path = Path(save_path) if save_path else _DEFAULT_SAVE_PATH
+        # rl.exploration_prob / rl.train_frequency 从 config 传入，不再硬编码
+        self.epsilon = epsilon
+        self.train_frequency = train_frequency
         self.data = []
+        self._episodes_since_train = 0
         self.load()
 
     def load(self):
@@ -45,7 +56,7 @@ class DataCollector:
         trajectory = []
 
         while not done:
-            action = self.policy.sample(state, epsilon=0.1)
+            action = self.policy.sample(state, epsilon=self.epsilon)
             next_state, reward, done, truncated, info = self.env.step(action)
             trajectory.append((state, action, reward))
             state = next_state
@@ -60,3 +71,9 @@ class DataCollector:
             logger.info(f"Collected trajectory with {len(trajectory)} steps")
         else:
             logger.debug("Discarded trajectory with no positive reward")
+
+        # 每 train_frequency 个 episode 触发一次训练（预留接口）
+        self._episodes_since_train += 1
+        if self.train_frequency > 0 and self._episodes_since_train >= self.train_frequency:
+            self._episodes_since_train = 0
+            logger.info(f"train_frequency={self.train_frequency} reached, trigger point for fine-tuning")

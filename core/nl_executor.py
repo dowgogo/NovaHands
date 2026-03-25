@@ -1,9 +1,46 @@
 import json
+import re
+import difflib
 import logging
 from pydantic import BaseModel, ValidationError, field_validator
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from skills.skill_manager import SkillManager
 from models.model_manager import ModelManager
+
+# 关键词 → 技能名映射表（fallback 模式用）
+_KEYWORD_MAP = {
+    # 打开应用
+    "打开": "open_app",
+    "open": "open_app",
+    "启动": "open_app",
+    "运行": "open_app",
+    "launch": "open_app",
+    # 截图
+    "截图": "screenshot",
+    "截屏": "screenshot",
+    "screenshot": "screenshot",
+    # 搜索
+    "搜索": "web_search",
+    "search": "web_search",
+    "查一下": "web_search",
+    "查找": "web_search",
+    # 关闭
+    "关闭": "close_app",
+    "close": "close_app",
+    "退出": "close_app",
+    "exit": "close_app",
+    # 鼠标点击
+    "点击": "mouse_click",
+    "click": "mouse_click",
+    "单击": "mouse_click",
+    # 键盘输入
+    "输入": "type_text",
+    "type": "type_text",
+    "键入": "type_text",
+    # 滚动
+    "滚动": "scroll",
+    "scroll": "scroll",
+}
 
 logger = logging.getLogger('novahands')
 
@@ -30,9 +67,15 @@ class NLExecutor:
         self.skill_manager = skill_manager
         self.model = model_manager.get_model()
 
-    def execute(self, user_input: str, controller, **context):
+    def execute(self, user_input: str, controller, **context) -> Optional[str]:
+        """执行用户指令，返回实际执行的技能名；未匹配时返回 None。"""
         # 对用户输入做长度限制，防止 Prompt Injection 超长攻击
         user_input = user_input[:_MAX_INPUT_LENGTH]
+
+        # model=None（provider=none）时直接走 fallback，不尝试调用 LLM
+        if self.model is None:
+            logger.info("No LLM available, using fallback keyword matching")
+            return self._fallback_execution(user_input, controller, **context)
 
         prompt = self._build_prompt(user_input, context)
         response = None  # 提前初始化，防止 except 块中 NameError
@@ -52,13 +95,14 @@ class NLExecutor:
 
             self.skill_manager.execute_skill(skill_name, controller, **params)
             logger.info(f"Executed skill: {skill_name}")
+            return skill_name
         except ValidationError as e:
             resp_preview = (response[:200] if response else '<no response>')
             logger.error(f"Model output invalid (preview): {resp_preview!r}, error: {e}")
-            self._fallback_execution(user_input, controller, **context)
+            return self._fallback_execution(user_input, controller, **context)
         except Exception as e:
             logger.error(f"Execution failed: {e}")
-            self._fallback_execution(user_input, controller, **context)
+            return self._fallback_execution(user_input, controller, **context)
 
     def _extract_json(self, text: str) -> str:
         if "```json" in text:
@@ -73,17 +117,45 @@ class NLExecutor:
                 return text[start:end].strip()
         return text.strip()
 
-    def _fallback_execution(self, user_input: str, controller, **context):
-        """Fallback：仅匹配技能名，不传入 context 参数（防止注入）"""
-        skill_name = user_input.strip().lower()
-        if self.skill_manager.get_skill(skill_name):
-            # Fallback 不传 context，仅执行无参技能
-            try:
-                self.skill_manager.execute_skill(skill_name, controller)
-            except Exception as e:
-                logger.error(f"Fallback execution failed for '{skill_name}': {e}")
-        else:
-            logger.warning(f"Unrecognized command (truncated): {user_input[:100]!r}")
+    def _fallback_execution(self, user_input: str, controller, **context) -> Optional[str]:
+        """三层 Fallback：
+        1. 精确名称匹配（用户直接输入技能名）
+        2. 关键词映射（中英文关键词 → 技能名）
+        3. 模糊匹配（difflib，相似度 >= 0.6）
+        安全：不传入 context，防止参数注入
+        """
+        text = user_input.strip().lower()
+        available = self.skill_manager.list_skills()
+
+        # 层 1：精确匹配
+        if self.skill_manager.get_skill(text):
+            logger.info(f"Fallback: exact match → '{text}'")
+            return self._run_fallback_skill(text, controller)
+
+        # 层 2：关键词映射
+        for keyword, skill_name in _KEYWORD_MAP.items():
+            if keyword in text and self.skill_manager.get_skill(skill_name):
+                logger.info(f"Fallback: keyword '{keyword}' → '{skill_name}'")
+                return self._run_fallback_skill(skill_name, controller)
+
+        # 层 3：模糊匹配（cutoff=0.6）
+        close = difflib.get_close_matches(text, available, n=1, cutoff=0.6)
+        if close:
+            logger.info(f"Fallback: fuzzy match '{text}' → '{close[0]}'")
+            return self._run_fallback_skill(close[0], controller)
+
+        logger.warning(f"Fallback: no match for command (truncated): {user_input[:100]!r}")
+        return None
+
+    def _run_fallback_skill(self, skill_name: str, controller) -> str:
+        """执行 fallback 技能（不传 context 参数）"""
+        try:
+            self.skill_manager.execute_skill(skill_name, controller)
+            logger.info(f"Fallback execution succeeded: {skill_name}")
+            return skill_name
+        except Exception as e:
+            logger.error(f"Fallback execution failed for '{skill_name}': {e}")
+            return None
 
     def _build_prompt(self, user_input: str, context: dict) -> str:
         skill_list = self.skill_manager.list_skills()

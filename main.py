@@ -14,7 +14,7 @@ from rl.collector import DataCollector
 from rl.trainer import RLFineTuner
 from rl.evolution import SkillEvolution
 from utils.config_loader import ConfigLoader
-from utils.logger import logger
+from utils.logger import setup_logger, logger as _default_logger
 
 
 def main():
@@ -25,6 +25,13 @@ def main():
     args = parser.parse_args()
 
     config = ConfigLoader()
+
+    # ── config 配置项真正生效 ─────────────────────────────────
+    # logging.level：控制台日志级别（DEBUG/INFO/WARNING/ERROR）
+    log_level = config.get('logging.level', 'INFO')
+    log_file  = config.get('logging.file', None)
+    logger = setup_logger(log_level=log_level, log_file=log_file)
+
     controller = Controller()
     safe_guard = SafeGuard()
     skill_manager = SkillManager()
@@ -36,7 +43,9 @@ def main():
         input("Learning mode enabled. Press Enter to stop...")
         recorder.stop_recording()
         generator = SkillGenerator(recorder)
-        new_skills = generator.generate_skills(output_dir="skills/user")
+        # 默认持久化到 skills/user/ 目录
+        user_skill_dir = config.get('skill_dirs.user', 'skills/user')
+        new_skills = generator.generate_skills(output_dir=user_skill_dir)
         logger.info(f"Generated {len(new_skills)} new skills")
         for skill in new_skills:
             print(f"  - {skill.name}: {skill.description}")
@@ -51,7 +60,14 @@ def main():
         print("若不需要 LLM 策略，可在 rl/policy.py 中修改为随机策略。")
         env = NovaHandsEnv(skill_manager=skill_manager)
         policy = PolicyModel(skill_list=skill_manager.list_skills())
-        collector = DataCollector(env, policy)
+        # rl.exploration_prob / rl.train_frequency 从 config 读取
+        exploration_prob  = config.get('rl.exploration_prob', 0.1)
+        train_frequency   = config.get('rl.train_frequency', 100)
+        collector = DataCollector(
+            env, policy,
+            epsilon=exploration_prob,
+            train_frequency=train_frequency
+        )
         logger.info("Starting RL data collection. Press Ctrl+C to stop.")
         try:
             while True:
@@ -88,3 +104,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

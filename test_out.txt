@@ -6,51 +6,51 @@
 
 
 >> 配置加载器 (ConfigLoader)
-2026-03-25 11:59:56,550 - novahands - WARNING - Environment variable '_NH_MISSING_VAR' is not set. Related feature may not work correctly.
+2026-03-25 12:02:57,582 - novahands - WARNING - Environment variable '_NH_MISSING_VAR' is not set. Related feature may not work correctly.
 
 >> 技能基类 (BaseSkill)
 
 >> 技能管理器 (SkillManager)
-2026-03-25 11:59:56,638 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:56,642 - novahands - INFO - Loaded native skill: send_email
-2026-03-25 11:59:56,649 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:56,650 - novahands - INFO - Loaded native skill: send_email
-2026-03-25 11:59:56,651 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:56,652 - novahands - INFO - Loaded native skill: send_email
-2026-03-25 11:59:56,655 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:56,657 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,618 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,620 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,626 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,627 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,628 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,628 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,629 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,630 - novahands - INFO - Loaded native skill: send_email
 
 >> 控制器 (Controller)
 
 >> 安全守卫 (SafeGuard)
-2026-03-25 11:59:56,757 - novahands - WARNING - App 'malicious.exe' not in whitelist
+2026-03-25 12:02:57,706 - novahands - WARNING - App 'malicious.exe' not in whitelist
 
 >> 自然语言执行器 (NLExecutor)
-2026-03-25 11:59:56,790 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:56,790 - novahands - INFO - Loaded native skill: send_email
-2026-03-25 11:59:56,977 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:56,979 - novahands - INFO - Loaded native skill: send_email
-2026-03-25 11:59:56,981 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:56,982 - novahands - INFO - Loaded native skill: send_email
-2026-03-25 11:59:56,984 - novahands - INFO - Executed skill: open_app
-2026-03-25 11:59:56,988 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:56,989 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,727 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,728 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,816 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,816 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,818 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,818 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,820 - novahands - INFO - Executed skill: open_app
+2026-03-25 12:02:57,822 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,822 - novahands - INFO - Loaded native skill: send_email
 
 >> 打开应用技能 (OpenAppSkill)
 
 >> RL 模拟控制器 (MockController)
 
 >> RL 训练环境 (NovaHandsEnv)
-2026-03-25 11:59:57,007 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:57,008 - novahands - INFO - Loaded native skill: send_email
-2026-03-25 11:59:57,011 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:57,012 - novahands - INFO - Loaded native skill: send_email
-2026-03-25 11:59:57,014 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:57,015 - novahands - INFO - Loaded native skill: send_email
-2026-03-25 11:59:57,016 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:57,017 - novahands - INFO - Loaded native skill: send_email
-2026-03-25 11:59:57,020 - novahands - INFO - Loaded native skill: open_app
-2026-03-25 11:59:57,021 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,831 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,831 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,832 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,832 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,833 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,833 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,834 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,834 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:02:57,835 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:02:57,836 - novahands - INFO - Loaded native skill: send_email
 
 >> 线程安全 (ThreadSafety)
 

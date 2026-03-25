@@ -2,6 +2,7 @@ import os
 import logging
 from pathlib import Path
 from utils.logger import logger
+from rl.utils import format_state
 
 
 class RLFineTuner:
@@ -40,7 +41,7 @@ class RLFineTuner:
         texts = []
         labels = []
         for item in dataset:
-            state_text = self._format_state(item["state"])
+            state_text = format_state(item["state"])
             skill_name = self.skill_list[item["action"]]
             texts.append(state_text)
             labels.append(skill_name)
@@ -124,10 +125,3 @@ class RLFineTuner:
             logger.error(f"Failed to save LoRA weights: {e}")
             raise
 
-    def _format_state(self, state):
-        return (
-            f"当前应用: {state['current_app']}\n"
-            f"上一条指令: {state['last_user_input']}\n"
-            f"上一技能: {state['last_skill']}\n"
-            f"结果: {'成功' if state['last_result'] else '失败'}"
-        )

@@ -26,7 +26,10 @@ class PatternMiner:
 
     def _action_to_str(self, action):
         if action.type == "click":
-            return f"click_{action.details['button']}"
+            # 保留坐标，格式 click_<x>_<y>，供 GeneratedSkill 回放
+            x = action.details.get('x', 0)
+            y = action.details.get('y', 0)
+            return f"click_{x}_{y}"
         elif action.type == "key_press":
             key = action.details['key']
             # Avoid recording actual letters for privacy

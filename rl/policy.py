@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from models.local_model import LocalModel
 from utils.logger import logger
+from rl.utils import format_state
 
 
 class PolicyModel(LocalModel):
@@ -23,7 +24,7 @@ class PolicyModel(LocalModel):
         return logits
 
     def sample(self, state: dict, epsilon: float = 0.1):
-        state_text = self._format_state(state)
+        state_text = format_state(state)
         logits = self.get_action_logits(state_text)
         probs = torch.softmax(logits, dim=-1).numpy()
         if np.random.random() < epsilon:
@@ -33,10 +34,3 @@ class PolicyModel(LocalModel):
             action = np.random.choice(len(self.skill_list), p=probs)
         return action
 
-    def _format_state(self, state):
-        return (
-            f"当前应用: {state['current_app']}\n"
-            f"上一条指令: {state['last_user_input']}\n"
-            f"上一技能: {state['last_skill']}\n"
-            f"结果: {'成功' if state['last_result'] else '失败'}"
-        )
