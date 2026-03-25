@@ -16,11 +16,13 @@ class GeneratedSkill(BaseSkill):
     def execute(self, controller, **kwargs):
         for action_str in self.actions_pattern:
             if action_str.startswith("click_"):
-                # This is a placeholder; in practice we'd need coordinates or template.
+                # 占位：实际需要坐标或模板匹配
                 pass
             elif action_str.startswith("key_"):
-                key = action_str.split("_")[1]
-                if key == "<LETTER>":
+                # 修复：防止 split('_')[1] IndexError
+                parts = action_str.split("_", 1)
+                key = parts[1] if len(parts) > 1 else ""
+                if not key or key == "<LETTER>":
                     continue
                 controller.press(key)
             controller.wait(0.3)
@@ -48,10 +50,24 @@ class SkillGenerator:
 
     def _save_skill(self, skill: BaseSkill, output_dir: str):
         os.makedirs(output_dir, exist_ok=True)
+        # 修复：将 actions_pattern 正确序列化为 claw_parser 可解析的 steps 格式
+        steps = []
+        for action_str in skill.actions_pattern:
+            if action_str.startswith("key_"):
+                parts = action_str.split("_", 1)
+                key = parts[1] if len(parts) > 1 else ""
+                if key and key != "<LETTER>":
+                    steps.append({"action": "press", "key": key})
+            elif action_str.startswith("click_"):
+                # click 动作需要坐标，暂时跳过序列化
+                pass
+        if not steps:
+            steps = [{"action": "press", "key": "unknown"}]  # 至少保留一个步骤
+
         data = {
             "name": skill.name,
             "description": skill.description,
-            "steps": [{"action": "press", "key": "unknown"}],  # placeholder
+            "steps": steps,
             "parameters": {}
         }
         with open(os.path.join(output_dir, f"{skill.name}.json"), "w") as f:

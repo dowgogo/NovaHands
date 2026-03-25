@@ -46,6 +46,9 @@ def main():
         # RL mode: collect data
         # 安全说明：默认使用 MockController，不会操控真实鼠标键盘
         # 若需接入真实环境，请传入 real_controller=controller 并确保在沙箱中运行
+        print("RL 数据采集模式启动中...")
+        print("注意：RL 策略依赖本地 LLM（PolicyModel），首次运行将自动下载模型（约 500MB）。")
+        print("若不需要 LLM 策略，可在 rl/policy.py 中修改为随机策略。")
         env = NovaHandsEnv(skill_manager=skill_manager)
         policy = PolicyModel(skill_list=skill_manager.list_skills())
         collector = DataCollector(env, policy)
@@ -55,7 +58,7 @@ def main():
                 collector.collect_episode()
                 time.sleep(1)
         except KeyboardInterrupt:
-            pass
+            print("\nRL data collection stopped.")
         return
 
     if args.gui:
@@ -65,11 +68,22 @@ def main():
     else:
         executor = NLExecutor(skill_manager, model_manager)
         print("NovaHands CLI mode. Enter natural language commands, or 'quit' to exit.")
-        while True:
-            cmd = input("> ")
-            if cmd == 'quit':
-                break
-            executor.execute(cmd, controller, current_app=safe_guard.get_current_app())
+        print("(按 Ctrl+C 或输入 'quit' 退出)")
+        # 修复：捕获 KeyboardInterrupt，优雅退出而非打印堆栈跟踪
+        try:
+            while True:
+                try:
+                    cmd = input("> ")
+                except EOFError:
+                    break
+                if cmd.strip().lower() in ('quit', 'exit', 'q'):
+                    break
+                if not cmd.strip():
+                    continue
+                executor.execute(cmd, controller, current_app=safe_guard.get_current_app())
+        except KeyboardInterrupt:
+            pass
+        print("\nGoodbye!")
 
 
 if __name__ == '__main__':

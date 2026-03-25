@@ -1,4 +1,3 @@
-import openai
 import logging
 from .base_model import BaseModel
 
@@ -8,11 +7,17 @@ logger = logging.getLogger('novahands')
 class OpenAIModel(BaseModel):
     def __init__(self, model_name: str, api_key: str, **kwargs):
         super().__init__(model_name, **kwargs)
-        openai.api_key = api_key
+        try:
+            from openai import OpenAI
+        except ImportError:
+            raise ImportError(
+                "openai package is not installed. Run: pip install openai"
+            )
+        self.client = OpenAI(api_key=api_key)
 
     def chat(self, messages: list, **kwargs) -> str:
         try:
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
                 **{**self.kwargs, **kwargs}

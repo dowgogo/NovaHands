@@ -15,7 +15,7 @@ class ModelManager:
     def __init__(self):
         self.config = ConfigLoader()
         self.current_model: Optional[BaseModel] = None
-        self._lock = threading.Lock()  # 防止多线程并发初始化
+        self._lock = threading.RLock()  # RLock 可重入，防止 get_model()->set_model() 调用链死锁
         self._init_model()
 
     def _init_model(self):

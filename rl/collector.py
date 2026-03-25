@@ -5,22 +5,35 @@ from .environment import NovaHandsEnv
 from .policy import PolicyModel
 from utils.logger import logger
 
+# 默认数据路径：~/.novahands/rl_data.json（绝对路径，与启动目录无关）
+_DEFAULT_SAVE_PATH = Path.home() / ".novahands" / "rl_data.json"
+
 
 class DataCollector:
-    def __init__(self, env: NovaHandsEnv, policy: PolicyModel, save_path: str = "rl_data.json"):
+    def __init__(self, env: NovaHandsEnv, policy: PolicyModel, save_path=None):
         self.env = env
         self.policy = policy
-        self.save_path = Path(save_path)
+        self.save_path = Path(save_path) if save_path else _DEFAULT_SAVE_PATH
         self.data = []
         self.load()
 
     def load(self):
         if self.save_path.exists():
-            with open(self.save_path, 'r') as f:
-                self.data = json.load(f)
-            logger.info(f"Loaded {len(self.data)} RL samples")
+            try:
+                with open(self.save_path, 'r') as f:
+                    self.data = json.load(f)
+                logger.info(f"Loaded {len(self.data)} RL samples from {self.save_path}")
+            except (json.JSONDecodeError, ValueError):
+                # 修复：JSON 损坏时清空重建，防止构造时崩溃
+                logger.warning(
+                    f"Corrupted RL data file '{self.save_path}', resetting. "
+                    "Previous samples are lost."
+                )
+                self.data = []
 
     def save(self):
+        # 确保目录存在
+        self.save_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.save_path, 'w') as f:
             json.dump(self.data, f, indent=2)
 
@@ -47,4 +60,3 @@ class DataCollector:
             logger.info(f"Collected trajectory with {len(trajectory)} steps")
         else:
             logger.debug("Discarded trajectory with no positive reward")
-

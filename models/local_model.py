@@ -1,7 +1,5 @@
 import logging
 import os
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from .base_model import BaseModel
 
 logger = logging.getLogger('novahands')
@@ -30,6 +28,16 @@ class LocalModel(BaseModel):
     ):
         super().__init__(model_name, **kwargs)
         self.device = device
+
+        # 懒导入：torch/transformers 是重量级依赖，仅在 LocalModel 实例化时加载
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        except ImportError as e:
+            raise ImportError(
+                f"Local model requires torch and transformers: {e}\n"
+                "Run: pip install torch transformers"
+            ) from e
 
         # 安全修复：路径规范化，防止路径遍历
         raw_cache = cache_dir or os.path.join(
@@ -60,7 +68,6 @@ class LocalModel(BaseModel):
                 )
                 logger.info("Enabling 4-bit quantization on GPU")
             else:
-                # 安全修复：CPU 下忽略量化配置时给出明确警告
                 logger.warning(
                     "quantize_4bit=True requires CUDA device; ignoring on CPU. "
                     "Model will run in full precision and may use more memory."
@@ -81,18 +88,38 @@ class LocalModel(BaseModel):
             low_cpu_mem_usage=True
         )
         self.model.eval()
+        self._torch = torch
         logger.info(f"Loaded local model: {model_name} on {device}")
 
+    def _get_model_device(self):
+        """安全获取模型所在设备（兼容 device_map='auto' 分片情况）"""
+        try:
+            return next(self.model.parameters()).device
+        except StopIteration:
+            return self._torch.device("cpu")
+
     def chat(self, messages: list, **kwargs) -> str:
-        prompt = self._build_prompt(messages)
+        # 优先使用 tokenizer 内置 chat_template（兼容多模型格式）
+        if hasattr(self.tokenizer, "apply_chat_template"):
+            try:
+                prompt = self.tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True
+                )
+            except Exception:
+                prompt = self._build_prompt(messages)
+        else:
+            prompt = self._build_prompt(messages)
+
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
-        inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+        # 修复：使用 next(parameters()).device 而非 self.model.device（兼容 device_map='auto'）
+        target_device = self._get_model_device()
+        inputs = {k: v.to(target_device) for k, v in inputs.items()}
 
         # 安全修复：对 max_new_tokens 设置硬性上限，防止外部传入极大值
         requested_tokens = kwargs.get("max_new_tokens", 256)
         safe_max_tokens = min(int(requested_tokens), _MAX_NEW_TOKENS_LIMIT)
 
-        with torch.no_grad():
+        with self._torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
                 max_new_tokens=safe_max_tokens,
@@ -112,7 +139,7 @@ class LocalModel(BaseModel):
         return self.chat([{"role": "user", "content": prompt}], **kwargs)
 
     def _build_prompt(self, messages: list) -> str:
-        # Qwen2.5 format
+        """Fallback：Qwen2.5 格式的 prompt 构建，当 tokenizer 无 chat_template 时使用"""
         prompt = ""
         for msg in messages:
             role = msg.get("role", "")
@@ -125,4 +152,3 @@ class LocalModel(BaseModel):
                 prompt += f"<|im_start|>assistant\n{content}<|im_end|>\n"
         prompt += "<|im_start|>assistant\n"
         return prompt
-

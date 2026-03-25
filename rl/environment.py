@@ -127,7 +127,8 @@ class NovaHandsEnv(gym.Env):
         self.state = new_state
         return new_state, reward, done, truncated, {"skill": skill_name, "step": self._step_count}
 
-    def render(self, mode='human'):
+    def render(self):
+        """符合新版 gymnasium API，渲染模式在 __init__ 时通过 render_mode 参数确定。"""
         logger.info(
             f"Step {self._step_count}/{self.max_steps} | "
             f"last_skill={self.state['last_skill']} | "
