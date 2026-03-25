@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NovaHands Web Controller</title>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        textarea { width: 80%; height: 100px; }
+        button { margin-top: 10px; }
+        #result { margin-top: 20px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>NovaHands Web Controller</h1>
+    <textarea id="command" placeholder="输入自然语言指令..."></textarea><br>
+    <button onclick="execute()">执行</button>
+    <div id="result"></div>
+
+    <script>
+        const API_URL = 'http://localhost:8000/execute';
+        const API_KEY = 'your-api-key-here'; // Change to your actual key
+
+        async function execute() {
+            const cmd = document.getElementById('command').value;
+            if (!cmd) return;
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': API_KEY
+                },
+                body: JSON.stringify({ command: cmd })
+            });
+            const data = await response.json();
+            document.getElementById('result').innerText = JSON.stringify(data, null, 2);
+        }
+    </script>
+</body>
+</html>

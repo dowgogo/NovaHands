@@ -1,0 +1,22 @@
+pyautogui==0.9.54
+opencv-python==4.7.0.72
+psutil==5.9.5
+numpy==1.24.3
+Pillow==9.5.0
+pynput==1.7.6
+fastapi==0.95.1
+uvicorn==0.21.1
+pydantic==1.10.7
+openai==0.27.8
+anthropic==0.3.11
+requests==2.31.0
+transformers>=4.36.0
+torch>=2.0.0
+accelerate>=0.25.0
+peft>=0.7.0
+bitsandbytes>=0.41.0
+# Windows only
+pywin32==305
+# macOS only (uncomment if needed)
+# pyobjc-core==9.0
+# pyobjc-framework-Quartz==9.0
