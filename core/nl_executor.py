@@ -142,10 +142,24 @@ class NLExecutor:
                 return candidate
 
         # 从文本中提取第一个完整的 {...} 块（处理模型在 JSON 前后附加说明文字的情况）
+        # 使用状态机正确处理字符串内的 {} 字符，避免提前截断
         brace_start = text.find("{")
         if brace_start != -1:
             depth = 0
+            in_string = False
+            escape_next = False
             for i, ch in enumerate(text[brace_start:], start=brace_start):
+                if escape_next:
+                    escape_next = False
+                    continue
+                if ch == '' and in_string:
+                    escape_next = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
                 if ch == "{":
                     depth += 1
                 elif ch == "}":

@@ -6,15 +6,10 @@ from core.safe_guard import SafeGuard
 from core.nl_executor import NLExecutor
 from skills.skill_manager import SkillManager
 from models.model_manager import ModelManager
-from learning.action_recorder import ActionRecorder
-from learning.skill_generator import SkillGenerator
-from rl.environment import NovaHandsEnv
-from rl.policy import PolicyModel
-from rl.collector import DataCollector
-from rl.trainer import RLFineTuner
-from rl.evolution import SkillEvolution
 from utils.config_loader import ConfigLoader
 from utils.logger import setup_logger, logger as _default_logger
+# 注意：RL / learning 相关模块在各自的 args 分支内懒导入，
+# 避免未安装 torch/gymnasium 等重量级依赖时启动失败。
 
 
 def main():
@@ -38,6 +33,8 @@ def main():
     model_manager = ModelManager()
 
     if args.learn:
+        from learning.action_recorder import ActionRecorder
+        from learning.skill_generator import SkillGenerator
         recorder = ActionRecorder(safe_guard)
         recorder.start_recording()
         input("Learning mode enabled. Press Enter to stop...")
@@ -52,6 +49,9 @@ def main():
         return
 
     if args.rl:
+        from rl.environment import NovaHandsEnv
+        from rl.policy import PolicyModel
+        from rl.collector import DataCollector
         # RL mode: collect data
         # 安全说明：默认使用 MockController，不会操控真实鼠标键盘
         # 若需接入真实环境，请传入 real_controller=controller 并确保在沙箱中运行

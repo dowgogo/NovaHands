@@ -13,7 +13,9 @@ class ClawSkill(BaseSkill):
         self.steps = steps
 
     def execute(self, controller, **kwargs):
-        params = {**self.parameters, **kwargs}
+        # Bug fix: self.parameters 是类型声明字典（如 {"key": "str"}），不应合并到实际参数中
+        # 正确做法：只用 kwargs 作为实际参数，self.parameters 只用于 validate_parameters
+        params = dict(kwargs)
         for step in self.steps:
             action = step.get("action")
             if action == "hotkey":

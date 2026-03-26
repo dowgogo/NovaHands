@@ -29,13 +29,17 @@ class BaseSkill(ABC):
                 return False
             if expected_type == "any":
                 continue
-            expected_cls = _TYPE_MAP.get(expected_type)
-            if expected_cls is None:
+            # _TYPE_MAP["any"] = None，需在此前已 continue；其他 None 才是真正未知类型
+            if expected_type not in _TYPE_MAP:
                 # 未知类型名，拒绝执行，避免 eval() 注入
                 raise ValueError(
                     f"Unknown parameter type '{expected_type}' for key '{key}'. "
                     f"Allowed types: {list(_TYPE_MAP.keys())}"
                 )
+            expected_cls = _TYPE_MAP[expected_type]
+            if expected_cls is None:
+                # "any" 已在上方 continue，此处不应到达；防御性跳过
+                continue
             if not isinstance(kwargs[key], expected_cls):
                 return False
         return True

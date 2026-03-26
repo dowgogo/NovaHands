@@ -31,7 +31,7 @@ class DataCollector:
     def load(self):
         if self.save_path.exists():
             try:
-                with open(self.save_path, 'r') as f:
+                with open(self.save_path, 'r', encoding='utf-8') as f:
                     self.data = json.load(f)
                 logger.info(f"Loaded {len(self.data)} RL samples from {self.save_path}")
             except (json.JSONDecodeError, ValueError):
@@ -41,12 +41,27 @@ class DataCollector:
                     "Previous samples are lost."
                 )
                 self.data = []
+            except OSError as e:
+                logger.error(f"Cannot read RL data file '{self.save_path}': {e}")
+                self.data = []
 
     def save(self):
         # 确保目录存在
         self.save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.save_path, 'w') as f:
-            json.dump(self.data, f, indent=2)
+        # 先写临时文件，写成功后再原子替换，防止写一半时崩溃导致数据损坏
+        tmp_path = self.save_path.with_suffix('.tmp')
+        try:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(self.data, f, indent=2)
+            tmp_path.replace(self.save_path)
+        except OSError as e:
+            logger.error(f"Failed to save RL data to '{self.save_path}': {e}")
+            # 清理可能残留的临时文件
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
     def collect_episode(self):
         # 适配新版 gymnasium API：reset() 返回 (observation, info)
