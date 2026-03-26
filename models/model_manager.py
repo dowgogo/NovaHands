@@ -89,9 +89,7 @@ class ModelManager:
                 raise ValueError(f"Unknown model provider: {provider}")
             logger.info(f"Switched to model: {provider} - {self.current_model.model_name}")
 
-    def get_model(self) -> BaseModel:
+    def get_model(self) -> Optional[BaseModel]:
         with self._lock:
-            if not self.current_model:
-                self._init_model()
             return self.current_model
 

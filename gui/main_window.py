@@ -131,10 +131,12 @@ class MainWindow:
         self.root.after(0, self.progress.stop)
 
     def _clear_output(self):
-        self.text_output.config(state=tk.NORMAL)
-        self.text_output.delete("1.0", tk.END)
-        self.text_output.config(state=tk.DISABLED)
-        self.status_var.set("就绪")
+        def _do_clear():
+            self.text_output.config(state=tk.NORMAL)
+            self.text_output.delete("1.0", tk.END)
+            self.text_output.config(state=tk.DISABLED)
+            self.status_var.set("就绪")
+        self.root.after(0, _do_clear)
 
     # ── 执行逻辑 ─────────────────────────────────────
 
