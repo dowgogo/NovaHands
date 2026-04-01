@@ -134,7 +134,10 @@ class ExecutorMemory:
         from collections import Counter
         names = [r.skill_name for r in errors]
         counter = Counter(names)
-        most_common_name, count = counter.most_common(1)[0]
+        most_common_list = counter.most_common(1)
+        if not most_common_list:
+            return None
+        most_common_name, count = most_common_list[0]
         if count >= 2:
             return (
                 f"注意：技能 '{most_common_name}' 最近已连续失败 {count} 次，"

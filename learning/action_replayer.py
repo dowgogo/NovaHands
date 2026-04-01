@@ -183,7 +183,7 @@ class ActionReplayer:
             return contains.lower() in current_app.lower()
         else:
             logger.warning(f"Unknown check type: {check_type}")
-            return True
+            return False  # FIX MEDIUM-1: unknown type should return False (deny for safety)
 
     def _match_ui_element(self, step: ReplayStep) -> Optional[tuple]:
         """
@@ -258,9 +258,9 @@ class ActionReplayer:
 
         key = step.details.get("key", "")
 
-        # 隐私保护：不允许回放字符键（防止密码泄露）
-        if key == "<CHAR>":
-            logger.debug("Skipping character key (privacy protection)")
+        # FIX HIGH-2: 扩展特殊键处理，包括 <CHAR>、<LETTER>、<unknown>
+        if key == "<CHAR>" or key == "<LETTER>" or key == "<unknown>":
+            logger.debug(f"Skipping sanitized key: {key}")
             return True
 
         try:

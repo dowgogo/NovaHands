@@ -133,6 +133,7 @@ class NLExecutor:
                     skill_name=skill_name,
                     parameters=skill_call.parameters,
                     success=True,
+                    error_msg=None,
                     duration=duration,
                 ))
                 return skill_name
@@ -147,7 +148,7 @@ class NLExecutor:
                 )
                 # 记录失败到 memory
                 self.memory.add(ExecutionRecord(
-                    skill_name="unknown",
+                    skill_name=skill_name,
                     parameters={},
                     success=False,
                     error_msg=error_str[:200],

@@ -132,8 +132,12 @@ class LocalModel(BaseModel):
         target_device = self._get_model_device()
         inputs = {k: v.to(target_device) for k, v in inputs.items()}
 
-        # 安全修复：对 max_new_tokens 设置硬性上限，防止外部传入极大值
+        # 安全修复：对 max_new_tokens 设置上下限校验，防止无效值
         requested_tokens = kwargs.get("max_new_tokens", 256)
+        # 修复 LOW-2：负值校验
+        if requested_tokens < 0:
+            logger.warning(f"max_new_tokens={requested_tokens} is negative, using default 256")
+            requested_tokens = 256
         safe_max_tokens = min(int(requested_tokens), _MAX_NEW_TOKENS_LIMIT)
 
         with self._torch.no_grad():
