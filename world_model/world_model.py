@@ -60,19 +60,43 @@ class WorldModel:
             配置对象
         """
         self.config = config or WorldModelConfig()
-        
-        # 初始化组件
+
+        # 初始化编码器
         self.encoder = create_encoder(
             self.config.encoder_type,
             self.config.encoder_config
         )
-        self.dynamics = DynamicsModel(self.config.dynamics_config)
-        self.reward = RewardModel(self.config.reward_config)
-        
+
+        # 获取状态维度
+        self.state_dim = self.encoder.latent_dim
+
         # 技能嵌入（随机初始化，可训练）
         self.skill_embeddings = {}
         self.action_embedding_dim = self.config.action_embedding_dim
-        
+
+        # 自动配置动态模型
+        if self.config.dynamics_config is None:
+            self.config.dynamics_config = DynamicsConfig(
+                input_dim=self.state_dim + self.action_embedding_dim,
+                output_dim=self.state_dim
+            )
+        else:
+            # 覆盖输入输出维度
+            self.config.dynamics_config.input_dim = self.state_dim + self.action_embedding_dim
+            self.config.dynamics_config.output_dim = self.state_dim
+
+        # 自动配置奖励模型
+        if self.config.reward_config is None:
+            self.config.reward_config = RewardConfig(
+                input_dim=self.state_dim
+            )
+        else:
+            self.config.reward_config.input_dim = self.state_dim
+
+        # 初始化模型
+        self.dynamics = DynamicsModel(self.config.dynamics_config)
+        self.reward = RewardModel(self.config.reward_config)
+
         logger.info("WorldModel initialized")
     
     def _get_action_embedding(self, action: str) -> np.ndarray:
@@ -293,14 +317,17 @@ class WorldModel:
         next_states = self.encoder.encode_batch([t.next_observation for t in dataset.transitions])
         actions = [t.action for t in dataset.transitions]
         rewards = [t.reward for t in dataset.transitions]
-        
+
+        # 将动作字符串转换为嵌入
+        action_embeddings = [self._get_action_embedding(a) for a in actions]
+
         # 准备动态模型训练数据
         dynamics_dataset = list(zip(
             states,
-            actions,
+            action_embeddings,
             next_states
         ))
-        
+
         # 准备奖励模型训练数据
         reward_dataset = list(zip(states, rewards))
         

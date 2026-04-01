@@ -137,7 +137,10 @@ class SimpleObservationEncoder(BaseObservationEncoder):
             self.config.text_embedding_dim * 2 +  # window_title + active_app
             self.config.position_embedding_dim
         )
-        
+
+        # 暴露 latent_dim 属性
+        self.latent_dim = self.config.latent_dim
+
         logger.info(
             f"SimpleObservationEncoder initialized: "
             f"latent_dim={self.config.latent_dim}, "

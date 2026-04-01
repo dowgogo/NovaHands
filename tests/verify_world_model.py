@@ -169,10 +169,10 @@ def test_world_model():
     # 创建世界模型
     config = WorldModelConfig(
         encoder_config=EncoderConfig(latent_dim=64),
-        action_embedding_dim=32
+        action_embedding_dim=64
     )
     model = WorldModel(config)
-    print(f"[OK] 创建世界模型: latent_dim=64, action_dim=32")
+    print(f"[OK] 创建世界模型: latent_dim=64, action_dim=64")
     
     # 编码观察
     observation = {

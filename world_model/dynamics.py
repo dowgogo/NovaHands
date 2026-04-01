@@ -57,17 +57,21 @@ class DynamicsModel:
             配置对象
         """
         self.config = config or DynamicsConfig()
-        
+
+        # 状态维度等于输出维度
+        self.state_dim = self.config.output_dim
+
         # 初始化集成模型
         self.ensembles = [
             self._init_model()
             for _ in range(self.config.num_ensembles)
         ]
-        
+
         logger.info(
             f"DynamicsModel initialized: "
             f"num_ensembles={self.config.num_ensembles}, "
-            f"hidden_dim={self.config.hidden_dim}"
+            f"hidden_dim={self.config.hidden_dim}, "
+            f"state_dim={self.state_dim}"
         )
     
     def _init_model(self):
@@ -270,33 +274,37 @@ class DynamicsModel:
         next_state: np.ndarray,
         delta_pred: np.ndarray
     ) -> dict:
-        """计算梯度（数值微分，简化版）"""
-        eps = 1e-5
-        
-        # 计算损失
-        def loss_fn(W):
-            model["W1"] = W
-            delta = self._forward(model, x)
-            pred = x[:len(delta)] + delta  # state from x
-            return np.mean((pred - next_state) ** 2)
-        
-        # 数值梯度（仅演示，实际应使用解析梯度）
-        grad_W1 = np.zeros_like(model["W1"])
-        grad_W2 = np.zeros_like(model["W2"])
-        grad_b1 = np.zeros_like(model["b1"])
-        grad_b2 = np.zeros_like(model["b2"])
-        
-        # 计算输出层梯度
-        delta_loss = 2 * (delta_pred - (next_state - x[:len(delta_pred)]))
-        grad_W2 = np.outer(delta_loss, np.tanh(np.dot(model["W1"], x) + model["b1"]))
+        """计算梯度（解析梯度，简化版）"""
+        # 前向传播（缓存中间值）
+        z1 = np.dot(model["W1"], x) + model["b1"]
+        a1 = np.tanh(z1)
+
+        # 计算损失和梯度
+        state = x[:self.config.output_dim]  # 提取状态部分
+        delta_target = next_state - state  # 目标状态差
+
+        # 输出层梯度
+        delta_loss = 2 * (delta_pred - delta_target)  # (output_dim,)
+
+        # W2: (output_dim, hidden_dim), a1: (hidden_dim,)
+        # grad_W2 = outer(delta_loss, a1) -> (output_dim, hidden_dim)
+        grad_W2 = np.outer(delta_loss, a1)
+
+        # grad_b2 = delta_loss -> (output_dim,)
         grad_b2 = delta_loss
-        
-        # 计算隐藏层梯度
-        hidden = np.tanh(np.dot(model["W1"], x) + model["b1"])
-        grad_hidden = np.dot(model["W2"].T, delta_loss) * (1 - hidden ** 2)
+
+        # 隐藏层梯度
+        # W2.T: (hidden_dim, output_dim), delta_loss: (output_dim,)
+        # grad_hidden = W2.T @ delta_loss * (1 - a1**2) -> (hidden_dim,)
+        grad_hidden = np.dot(model["W2"].T, delta_loss) * (1 - a1 ** 2)
+
+        # W1: (hidden_dim, input_dim), x: (input_dim,)
+        # grad_W1 = outer(grad_hidden, x) -> (hidden_dim, input_dim)
         grad_W1 = np.outer(grad_hidden, x)
+
+        # grad_b1 = grad_hidden -> (hidden_dim,)
         grad_b1 = grad_hidden
-        
+
         return {
             "W1": grad_W1,
             "b1": grad_b1,

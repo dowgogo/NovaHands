@@ -15,20 +15,26 @@ World Model Module
 - Dreamer V3: Mastering Diverse Domains through World Models (2023)
 """
 
-from .encoder import BaseObservationEncoder
-from .dynamics import DynamicsModel
-from .reward import RewardModel
-from .planner import LatentPlanner
-from .world_model import WorldModel
+from .encoder import BaseObservationEncoder, SimpleObservationEncoder, EncoderConfig
+from .dynamics import DynamicsModel, DynamicsConfig
+from .reward import RewardModel, RewardConfig
+from .planner import LatentPlanner, PlannerConfig
+from .world_model import WorldModel, WorldModelConfig
 from .trainer import WorldModelTrainer
 from .data import WorldModelTransition, WorldModelDataset
 
 __all__ = [
-    "ObservationEncoder",
+    "BaseObservationEncoder",
+    "SimpleObservationEncoder",
+    "EncoderConfig",
     "DynamicsModel",
+    "DynamicsConfig",
     "RewardModel",
+    "RewardConfig",
     "LatentPlanner",
+    "PlannerConfig",
     "WorldModel",
+    "WorldModelConfig",
     "WorldModelTrainer",
     "WorldModelTransition",
     "WorldModelDataset"

@@ -66,14 +66,21 @@ class SkillCall(BaseModel):
 
 
 class NLExecutor:
-    def __init__(self, skill_manager: SkillManager, model_manager: ModelManager,
-                 memory: Optional[ExecutorMemory] = None):
+    def __init__(
+        self,
+        skill_manager: SkillManager,
+        model_manager: ModelManager,
+        memory: Optional[ExecutorMemory] = None,
+        world_model: Optional['WorldModel'] = None
+    ):
         self.skill_manager = skill_manager
         self.model_manager = model_manager  # 保存 manager 引用，每次执行时动态取模型
         # 执行历史记忆：默认创建，也可从外部注入（便于测试）
         self.memory = memory if memory is not None else ExecutorMemory()
         # 最大 LLM 重试次数（错误自恢复，参考 AgentDebug 框架）
         self._max_retries = 2
+        # 世界模型：用于复杂任务规划
+        self.world_model = world_model
 
     def execute(self, user_input: str, controller, **context) -> Optional[str]:
         """执行用户指令，返回实际执行的技能名；未匹配时返回 None。"""
@@ -365,3 +372,224 @@ class NLExecutor:
             error_context += "\n请基于上述错误诊断，尝试选择不同的技能或修正参数。"
             return base_prompt + error_context
         return base_prompt
+
+    def plan_complex_task(
+        self,
+        user_input: str,
+        controller,
+        max_actions: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        使用世界模型规划复杂任务
+
+        Parameters
+        ----------
+        user_input : str
+            用户指令
+        controller : Controller
+            控制器实例
+        max_actions : int
+            最大动作数量
+
+        Returns
+        -------
+        action_plan : list of dict
+            动作计划，每个动作包含：
+            - skill: 技能名称
+            - parameters: 参数字典
+            - expected_reward: 预期奖励
+            - uncertainty: 不确定性
+        """
+        if self.world_model is None:
+            logger.warning("World model not available, falling back to single action")
+            # 降级：执行单个动作
+            skill_name = self.execute(user_input, controller)
+            if skill_name:
+                return [{
+                    "skill": skill_name,
+                    "parameters": {},
+                    "expected_reward": 0.0,
+                    "uncertainty": 1.0
+                }]
+            else:
+                return []
+
+        logger.info(f"Planning complex task: {user_input}")
+
+        # 1. 获取当前观察
+        current_obs = self._get_current_observation(controller)
+        current_state = self.world_model.encode_observation(current_obs)
+
+        # 2. 使用世界模型规划器
+        from world_model.planner import LatentPlanner
+
+        planner = LatentPlanner(
+            world_model=self.world_model,
+            skill_list=list(self.skill_manager._skills.keys()),
+            method="cem"
+        )
+
+        # 3. 规划最优动作序列
+        best_action, expected_return, action_sequence = planner.plan(
+            initial_state=current_state,
+            horizon=5
+        )
+
+        # 4. 转换为动作计划
+        action_plan = []
+
+        for i, action in enumerate(action_sequence):
+            # 使用 LLM 解析动作参数
+            prompt = f"""
+用户指令：{user_input}
+
+当前计划第 {i+1} 步动作：{action}
+
+为这个动作提取参数（JSON 格式）：
+{{"parameters": {{...}}}}
+
+如果不需要参数，返回空参数对象：
+{{"parameters": {{}}}}
+
+只输出 JSON，不要解释。
+"""
+
+            model = self.model_manager.get_model()
+            response = model.generate(prompt, temperature=0.0)
+
+            try:
+                json_str = self._extract_json(response)
+                params_data = json.loads(json_str)
+                parameters = params_data.get("parameters", {})
+            except Exception as e:
+                logger.warning(f"Failed to extract parameters: {e}")
+                parameters = {}
+
+            # 预测奖励和不确定性
+            state = current_state if i == 0 else None
+            if state is not None:
+                reward = self.world_model.predict_reward(state)
+                _, uncertainty = self.world_model.predict_next_state(state, action)
+            else:
+                reward = 0.0
+                uncertainty = 0.0
+
+            action_plan.append({
+                "skill": action,
+                "parameters": parameters,
+                "expected_reward": reward,
+                "uncertainty": uncertainty
+            })
+
+        logger.info(f"Planned {len(action_plan)} actions")
+        return action_plan[:max_actions]
+
+    def execute_plan(
+        self,
+        action_plan: List[Dict[str, Any]],
+        controller
+    ) -> Dict[str, Any]:
+        """
+        执行动作计划
+
+        Parameters
+        ----------
+        action_plan : list of dict
+            动作计划
+        controller : Controller
+            控制器实例
+
+        Returns
+        -------
+        result : dict
+            执行结果
+            - total_steps: 总步数
+            - succeeded: 成功步数
+            - failed: 失败步数
+            - total_reward: 总奖励
+        """
+        total_steps = len(action_plan)
+        succeeded = 0
+        failed = 0
+        total_reward = 0.0
+
+        for step, action_dict in enumerate(action_plan):
+            skill_name = action_dict["skill"]
+            parameters = action_dict["parameters"]
+
+            logger.info(f"Executing step {step+1}/{total_steps}: {skill_name}")
+
+            try:
+                # 执行动作
+                self.skill_manager.execute_skill(skill_name, controller, **parameters)
+
+                # 更新状态
+                current_obs = self._get_current_observation(controller)
+                current_state = self.world_model.encode_observation(current_obs)
+
+                # 预测奖励
+                reward = self.world_model.predict_reward(current_state)
+                total_reward += reward
+
+                succeeded += 1
+
+            except Exception as e:
+                logger.error(f"Step {step+1} failed: {e}")
+                failed += 1
+
+                # 高不确定性时停止执行
+                uncertainty = action_dict.get("uncertainty", 0.0)
+                if uncertainty > 0.5:
+                    logger.warning(
+                        f"High uncertainty ({uncertainty:.3f}), stopping execution"
+                    )
+                    break
+
+        result = {
+            "total_steps": total_steps,
+            "succeeded": succeeded,
+            "failed": failed,
+            "total_reward": total_reward
+        }
+
+        logger.info(f"Plan execution completed: {result}")
+        return result
+
+    def _get_current_observation(self, controller) -> Dict[str, Any]:
+        """
+        获取当前观察
+
+        Parameters
+        ----------
+        controller : Controller
+            控制器实例
+
+        Returns
+        -------
+        observation : dict
+            观察字典
+        """
+        observation = {
+            "window_title": "",
+            "active_app": "",
+            "cursor_pos": (0, 0)
+        }
+
+        try:
+            # 获取当前应用
+            current_app = controller.get_current_app()
+            observation["active_app"] = current_app
+            observation["window_title"] = current_app
+
+            # 获取光标位置
+            try:
+                import pyautogui
+                x, y = pyautogui.position()
+                observation["cursor_pos"] = (x, y)
+            except ImportError:
+                pass
+
+        except Exception as e:
+            logger.warning(f"Failed to get current observation: {e}")
+
+        return observation

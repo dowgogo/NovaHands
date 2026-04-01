@@ -58,9 +58,14 @@ class ReplayResult:
 
 
 class ActionReplayer:
-    """动作回放器，支持语义回放和参数化"""
+    """动作回放器，支持语义回放、参数化和世界模型验证"""
 
-    def __init__(self, safe_guard: SafeGuard, screen_match_threshold: float = 0.8):
+    def __init__(
+        self,
+        safe_guard: SafeGuard,
+        screen_match_threshold: float = 0.8,
+        world_model: Optional['WorldModel'] = None
+    ):
         """
         Parameters
         ----------
@@ -68,9 +73,12 @@ class ActionReplayer:
             安全守卫实例，用于权限检查
         screen_match_threshold : float
             屏幕元素匹配阈值（0-1），用于语义回放
+        world_model : WorldModel, optional
+            世界模型，用于回放前验证
         """
         self.safe_guard = safe_guard
         self.screen_match_threshold = screen_match_threshold
+        self.world_model = world_model
         self._steps: List[ReplayStep] = []
 
     def load_from_recorder(self, actions: List, **metadata):
@@ -188,6 +196,146 @@ class ActionReplayer:
                 f"Known types: text_exists, window_title"
             )
             return False  # 安全默认：未知类型拒绝执行
+
+    def _validate_with_world_model(
+        self,
+        current_observation: Dict[str, Any],
+        step: ReplayStep,
+        max_steps_ahead: int = 3
+    ) -> Tuple[bool, float, str]:
+        """
+        使用世界模型验证动作序列的安全性
+
+        Parameters
+        ----------
+        current_observation : dict
+            当前观察
+        step : ReplayStep
+            当前步骤
+        max_steps_ahead : int
+            向前预测的步数
+
+        Returns
+        -------
+        is_safe : bool
+            是否安全
+        avg_uncertainty : float
+            平均不确定性
+        reason : str
+            详细原因
+        """
+        if self.world_model is None:
+            return True, 0.0, "World model not available"
+
+        try:
+            # 编码当前观察
+            current_state = self.world_model.encode_observation(current_observation)
+
+            # 模拟接下来的动作
+            total_uncertainty = 0.0
+            num_steps = 0
+
+            for i in range(max_steps_ahead):
+                step_idx = step.index + i
+                if step_idx >= len(self._steps):
+                    break
+
+                future_step = self._steps[step_idx]
+
+                # 将动作类型转换为技能名称
+                action_name = self._action_type_to_skill_name(
+                    future_step.action_type
+                )
+
+                # 预测下一状态和不确定性
+                next_state, uncertainty = self.world_model.predict_next_state(
+                    current_state,
+                    action_name
+                )
+
+                total_uncertainty += uncertainty
+                num_steps += 1
+
+                # 更新状态
+                current_state = next_state
+
+            # 计算平均不确定性
+            if num_steps > 0:
+                avg_uncertainty = total_uncertainty / num_steps
+            else:
+                avg_uncertainty = 0.0
+
+            # 判断安全性
+            uncertainty_threshold = 0.5  # 可配置
+
+            if avg_uncertainty < uncertainty_threshold:
+                is_safe = True
+                reason = f"Low uncertainty ({avg_uncertainty:.3f})"
+            else:
+                is_safe = False
+                reason = f"High uncertainty ({avg_uncertainty:.3f} > {uncertainty_threshold})"
+
+            return is_safe, avg_uncertainty, reason
+
+        except Exception as e:
+            logger.error(f"World model validation failed: {e}")
+            # 安全默认：允许执行
+            return True, 0.0, f"Validation error: {e}"
+
+    def _action_type_to_skill_name(self, action_type: str) -> str:
+        """
+        将动作类型转换为技能名称（世界模型使用）
+
+        Parameters
+        ----------
+        action_type : str
+            动作类型（如 "click", "key_press", "type"）
+
+        Returns
+        -------
+        skill_name : str
+            技能名称
+        """
+        # 简单映射
+        mapping = {
+            "click": "click",
+            "key_press": "type",
+            "type": "type",
+            "scroll": "scroll",
+            "drag": "drag"
+        }
+        return mapping.get(action_type, action_type)
+
+    def _get_current_observation(self) -> Dict[str, Any]:
+        """
+        获取当前系统观察（用于世界模型验证）
+
+        Returns
+        -------
+        observation : dict
+            观察字典
+        """
+        observation = {
+            "window_title": "",
+            "active_app": "",
+            "cursor_pos": (0, 0)
+        }
+
+        try:
+            # 获取当前窗口标题
+            current_app = self.safe_guard.get_current_app()
+            observation["active_app"] = current_app
+            observation["window_title"] = current_app
+
+            # 获取光标位置
+            if PYAUTOGUI_AVAILABLE:
+                x, y = pyautogui.position()
+                observation["cursor_pos"] = (x, y)
+
+        except Exception as e:
+            logger.warning(f"Failed to get current observation: {e}")
+
+        return observation
 
     def _match_ui_element(self, step: ReplayStep) -> Optional[tuple]:
         """
@@ -350,6 +498,36 @@ class ActionReplayer:
                 if on_step:
                     on_step(step.index, step_results[-1])
                 continue
+
+            # 世界模型验证
+            if self.world_model is not None:
+                # 获取当前观察
+                current_obs = self._get_current_observation()
+
+                # 验证动作序列
+                is_safe, uncertainty, reason = self._validate_with_world_model(
+                    current_obs,
+                    step
+                )
+
+                logger.debug(
+                    f"World model validation: safe={is_safe}, "
+                    f"uncertainty={uncertainty:.3f}, reason={reason}"
+                )
+
+                if not is_safe:
+                    logger.warning(
+                        f"Step {step.index} world model validation failed: {reason}"
+                    )
+                    step_results.append({
+                        "index": step.index,
+                        "status": "skipped",
+                        "reason": f"world model validation: {reason}"
+                    })
+                    skipped += 1
+                    if on_step:
+                        on_step(step.index, step_results[-1])
+                    continue
 
             # 执行动作
             result = {"index": step.index, "status": "unknown"}
