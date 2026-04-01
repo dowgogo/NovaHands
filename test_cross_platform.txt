@@ -1,0 +1,67 @@
+
+════════════════════════════════════════════════════════════
+  NovaHands 虚拟测试套件
+  （所有第三方依赖已 Mock，无需安装任何包）
+════════════════════════════════════════════════════════════
+
+
+>> 配置加载器 (ConfigLoader)
+2026-03-25 14:24:20,970 - novahands - WARNING - Environment variable '_NH_MISSING_VAR' is not set. Related feature may not work correctly.
+
+>> 技能基类 (BaseSkill)
+
+>> 技能管理器 (SkillManager)
+2026-03-25 14:24:21,176 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:21,183 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:24:21,198 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:21,199 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:24:21,201 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:21,201 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:24:21,205 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:21,205 - novahands - INFO - Loaded native skill: send_email
+
+>> 控制器 (Controller)
+
+>> 安全守卫 (SafeGuard)
+2026-03-25 14:24:21,593 - novahands - WARNING - App 'malicious.exe' not in whitelist
+
+>> 自然语言执行器 (NLExecutor)
+2026-03-25 14:24:21,778 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:21,779 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:24:22,439 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:22,442 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:24:22,445 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:22,445 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:24:22,450 - novahands - INFO - Executed skill: open_app
+2026-03-25 14:24:22,451 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:22,452 - novahands - INFO - Loaded native skill: send_email
+
+>> 打开应用技能 (OpenAppSkill)
+
+>> RL 模拟控制器 (MockController)
+
+>> RL 训练环境 (NovaHandsEnv)
+2026-03-25 14:24:22,477 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:22,479 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:24:22,481 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:22,482 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:24:22,483 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:22,483 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:24:22,484 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:22,485 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:24:22,487 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:24:22,488 - novahands - INFO - Loaded native skill: send_email
+
+>> 线程安全 (ThreadSafety)
+
+>> 安全修复验证 (SecurityFixes)
+
+>> 跨平台兼容性 (CrossPlatformCompat)
+
+════════════════════════════════════════════════════════════
+  总计: 60 项测试
+  通过: 60  失败: 0  错误: 0  跳过: 0
+
+  [OK] 全部测试通过！项目逻辑运行正常。
+════════════════════════════════════════════════════════════
+

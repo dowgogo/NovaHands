@@ -1,0 +1,4 @@
+2026-03-25 12:20:50,890 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:20:50,892 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:20:50,898 - novahands - INFO - No LLM configured (provider=none). NL execution will use keyword matching only.
+2026-03-25 12:20:50,936 - novahands - INFO - No LLM configured (provider=none). NL execution will use keyword matching only.

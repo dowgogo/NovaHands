@@ -1,0 +1,8 @@
+2026-03-25 12:20:23,988 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 12:20:23,993 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 12:20:24,001 - novahands - INFO - No LLM configured (provider=none). NL execution will use keyword matching only.
+2026-03-25 12:20:24,001 - novahands - INFO - No LLM configured (provider=none). NL execution will use keyword matching only.
+NovaHands CLI mode. Enter natural language commands, or 'quit' to exit.
+(按 Ctrl+C 或输入 'quit' 退出)
+> 
+Goodbye!

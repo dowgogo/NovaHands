@@ -17,6 +17,8 @@ def main():
     parser.add_argument('--gui', action='store_true', help='Launch GUI')
     parser.add_argument('--learn', action='store_true', help='Record actions and generate skills')
     parser.add_argument('--rl', action='store_true', help='Start RL data collection')
+    parser.add_argument('--mcp', action='store_true', help='Start MCP server (Model Context Protocol)')
+    parser.add_argument('--replay', type=str, help='Replay from file (JSON)')
     args = parser.parse_args()
 
     config = ConfigLoader()
@@ -81,7 +83,41 @@ def main():
         from gui.main_window import MainWindow
         app = MainWindow(controller, skill_manager, model_manager)
         app.run()
-    else:
+
+    if args.mcp:
+        from core.mcp_server import MCPServer
+        mcp_config = config.get('mcp', {})
+        if not mcp_config.get('enabled', False):
+            logger.warning("MCP server disabled in config.json. Set mcp.enabled=true to enable.")
+        mcp_server = MCPServer(skill_manager, model_manager, **mcp_config)
+        logger.info(f"Starting MCP server on {mcp_server.host}:{mcp_server.port}")
+        mcp_server.start()
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("MCP server stopped")
+            mcp_server.stop()
+        return
+
+    if args.replay:
+        from learning.action_replayer import ActionReplayer
+        replay_config = config.get('replay', {})
+        replayer = ActionReplayer(
+            safe_guard,
+            screen_match_threshold=replay_config.get('screen_match_threshold', 0.8)
+        )
+        replayer.load_from_file(args.replay)
+        logger.info(f"Loaded replay plan from {args.replay}")
+        result = replayer.replay(
+            speed_multiplier=replay_config.get('default_speed_multiplier', 1.0)
+        )
+        print(f"\n回放结果: {result.succeeded}/{result.total_steps} 成功, "
+              f"{result.failed} 失败, {result.skipped} 跳过, "
+              f"耗时 {result.duration_seconds} 秒")
+        return
+
+    if not args.gui and not args.mcp and not args.replay:
         executor = NLExecutor(skill_manager, model_manager)
         print("NovaHands CLI mode. Enter natural language commands, or 'quit' to exit.")
         print("(按 Ctrl+C 或输入 'quit' 退出)")

@@ -1,0 +1,13 @@
+﻿git : remote: 
+所在位置 行:1 字符: 54
++ ... orkBuddy\20260325083234\NovaHands"; git push origin main 2>&1 | Out-F ...
++                                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (remote: :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+remote: GitHub found 8 vulnerabilities on dowgogo/NovaHands's default branch (1 critical, 4 high, 3 moderate). To find 
+out more, visit:        
+remote:      https://github.com/dowgogo/NovaHands/security/dependabot        
+remote: 
+To https://github.com/dowgogo/NovaHands.git
+   292e926..ccaa36e  main -> main

@@ -1,0 +1,80 @@
+{
+  "llm": {
+    "default": "ollama",
+    "openai": {
+      "model": "gpt-4",
+      "api_key": "",
+      "params": { "temperature": 0.2 }
+    },
+    "anthropic": {
+      "model": "claude-3-opus-20240229",
+      "api_key": "",
+      "params": {}
+    },
+  "ollama": {
+    "model": "qwen2.5:1.5b",
+    "base_url": "http://localhost:11434",
+    "think": false,
+    "timeout": 60,
+    "params": { "temperature": 0.2 }
+  },
+    "local": {
+      "model": "Qwen/Qwen2.5-0.5B-Instruct",
+      "device": "cpu",
+      "quantize_4bit": false,
+      "cache_dir": "~/.cache/novahands/models",
+      "params": { "temperature": 0.2, "max_new_tokens": 256 }
+    }
+  },
+  "security": {
+    "allowed_apps": [
+      "notepad.exe",
+      "winword.exe",
+      "chrome.exe",
+      "wechat.exe",
+      "Code.exe",
+      "explorer.exe",
+      "powershell.exe"
+    ],
+    "sensitive_operations": [
+      "send_keys",
+      "click_send_button",
+      "delete_file"
+    ],
+    "confirm_timeout": 30,
+    "enable_failsafe": true
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "novahands.log"
+  },
+  "rl": {
+    "enabled": true,
+    "collect_data": true,
+    "train_frequency": 86400,
+    "lora_rank": 8,
+    "learning_rate": 1e-4,
+    "exploration_prob": 0.2,
+    "skill_evolution_threshold": 0.8
+  },
+  "skill_dirs": {
+    "user": "skills/user",
+    "extra": []
+  },
+  "api": {
+    "host": "127.0.0.1",
+    "port": 8000,
+    "api_key": "novahands-local-dev"
+  },
+  "mcp": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 3000,
+    "tool_prefix": "novahands"
+  },
+  "replay": {
+    "screen_match_threshold": 0.8,
+    "default_speed_multiplier": 1.0,
+    "auto_save_replay_dir": "replays"
+  }
+}

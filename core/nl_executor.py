@@ -1,11 +1,13 @@
 import json
 import re
+import time
 import difflib
 import logging
 from pydantic import BaseModel, ValidationError, field_validator
 from typing import Dict, Any, Optional
 from skills.skill_manager import SkillManager
 from models.model_manager import ModelManager
+from core.executor_memory import ExecutorMemory, ExecutionRecord
 
 # 关键词 → 技能名映射表（fallback 模式用）
 _KEYWORD_MAP = {
@@ -64,9 +66,14 @@ class SkillCall(BaseModel):
 
 
 class NLExecutor:
-    def __init__(self, skill_manager: SkillManager, model_manager: ModelManager):
+    def __init__(self, skill_manager: SkillManager, model_manager: ModelManager,
+                 memory: Optional[ExecutorMemory] = None):
         self.skill_manager = skill_manager
         self.model_manager = model_manager  # 保存 manager 引用，每次执行时动态取模型
+        # 执行历史记忆：默认创建，也可从外部注入（便于测试）
+        self.memory = memory if memory is not None else ExecutorMemory()
+        # 最大 LLM 重试次数（错误自恢复，参考 AgentDebug 框架）
+        self._max_retries = 2
 
     def execute(self, user_input: str, controller, **context) -> Optional[str]:
         """执行用户指令，返回实际执行的技能名；未匹配时返回 None。"""
@@ -81,40 +88,80 @@ class NLExecutor:
             logger.info("No LLM available, using fallback keyword matching")
             return self._fallback_execution(user_input, controller, **context)
 
-        prompt = self._build_prompt(user_input, context)
-        response = None  # 提前初始化，防止 except 块中 NameError
-        try:
-            response = model.generate(prompt, temperature=0.2)
-            # DEBUG：打印 LLM 原始返回，便于诊断解析问题
-            logger.info(f"[LLM RAW] {response!r}")
-            json_str = self._extract_json(response)
-            skill_call = SkillCall.model_validate_json(json_str)
-            skill_name = skill_call.skill
+        return self._execute_with_retry(user_input, controller, model, **context)
 
-            # skill=none 表示 LLM 认为无需执行任何技能（如问候、闲聊）
-            if skill_name == "none":
-                logger.info("LLM determined no skill needed for this input")
-                return None
+    def _execute_with_retry(self, user_input: str, controller, model,
+                            **context) -> Optional[str]:
+        """带自动重试的 LLM 执行（错误自恢复机制）。
 
-            # 技能名白名单校验：只允许已注册的技能
-            if not self.skill_manager.get_skill(skill_name):
-                raise ValueError(f"Skill '{skill_name}' not found in registry")
+        重试策略（参考 AgentDebug 框架）：
+        - 第 1 次：正常执行
+        - 第 2 次（若失败）：在 Prompt 中注入失败原因，引导 LLM 修正
+        - 第 3 次（若仍失败）：降级到 fallback 关键词匹配
+        """
+        last_error: Optional[str] = None
+        for attempt in range(self._max_retries + 1):
+            prompt = self._build_prompt(user_input, context,
+                                        retry_hint=last_error if attempt > 0 else None)
+            response = None
+            t_start = time.monotonic()
+            try:
+                response = model.generate(prompt, temperature=0.2)
+                logger.info(f"[LLM RAW attempt={attempt}] {response!r}")
+                json_str = self._extract_json(response)
+                skill_call = SkillCall.model_validate_json(json_str)
+                skill_name = skill_call.skill
 
-            # 安全合并：以模型解析结果为主，context 仅补充不覆盖
-            # 修复：原 params.update(context) 会导致 context 覆盖 LLM 解析结果（参数注入漏洞）
-            params = {**context, **skill_call.parameters}
+                # skill=none 表示 LLM 认为无需执行任何技能（如问候、闲聊）
+                if skill_name == "none":
+                    logger.info("LLM determined no skill needed for this input")
+                    return None
 
-            self.skill_manager.execute_skill(skill_name, controller, **params)
-            logger.info(f"Executed skill: {skill_name}")
-            return skill_name
-        except ValidationError as e:
-            resp_preview = (response[:300] if response else '<no response>')
-            logger.error(f"Model output validation failed.\nRaw response: {resp_preview!r}\nError: {e}")
-            return self._fallback_execution(user_input, controller, **context)
-        except Exception as e:
-            resp_preview = (response[:300] if response else '<no response>')
-            logger.error(f"Execution failed: {e}\nRaw response: {resp_preview!r}")
-            return self._fallback_execution(user_input, controller, **context)
+                # 技能名白名单校验：只允许已注册的技能
+                if not self.skill_manager.get_skill(skill_name):
+                    raise ValueError(f"Skill '{skill_name}' not found in registry")
+
+                # 安全合并：以模型解析结果为主，context 仅补充不覆盖
+                params = {**context, **skill_call.parameters}
+
+                self.skill_manager.execute_skill(skill_name, controller, **params)
+                duration = time.monotonic() - t_start
+                logger.info(f"Executed skill: {skill_name} (attempt={attempt}, {duration:.2f}s)")
+
+                # 记录成功执行到 memory
+                self.memory.add(ExecutionRecord(
+                    skill_name=skill_name,
+                    parameters=skill_call.parameters,
+                    success=True,
+                    duration=duration,
+                ))
+                return skill_name
+
+            except Exception as e:
+                duration = time.monotonic() - t_start
+                resp_preview = (response[:300] if response else "<no response>")
+                error_str = str(e)
+                logger.error(
+                    f"Execution failed (attempt={attempt}): {error_str}\n"
+                    f"Raw response: {resp_preview!r}"
+                )
+                # 记录失败到 memory
+                self.memory.add(ExecutionRecord(
+                    skill_name="unknown",
+                    parameters={},
+                    success=False,
+                    error_msg=error_str[:200],
+                    duration=duration,
+                ))
+                last_error = error_str
+                # 若还有重试机会，继续；否则降级 fallback
+                if attempt < self._max_retries:
+                    logger.info(f"Retrying with error context (attempt {attempt + 1}/{self._max_retries})...")
+                    continue
+
+        # 所有重试耗尽，降级 fallback
+        logger.warning("All LLM retries exhausted, falling back to keyword matching")
+        return self._fallback_execution(user_input, controller, **context)
 
     def _extract_json(self, text: str) -> str:
         """从 LLM 输出中提取 JSON 字符串。
@@ -237,7 +284,15 @@ class NLExecutor:
             logger.error(f"Fallback execution failed for '{skill_name}': {e}")
             return None
 
-    def _build_prompt(self, user_input: str, context: dict) -> str:
+    def _build_prompt(self, user_input: str, context: dict,
+                      retry_hint: Optional[str] = None) -> str:
+        """构建 LLM Prompt，支持重试提示注入（错误自恢复）。
+
+        若 retry_hint 非空，在 Prompt 中注入：
+        1. 前次执行历史摘要
+        2. 失败原因和修正建议
+        这样 LLM 可在第 2 次尝试时自我纠错。
+        """
         skill_list = self.skill_manager.list_skills()
         # 构建带参数签名的技能描述
         skill_descriptions_parts = []
@@ -258,7 +313,8 @@ class NLExecutor:
         safe_input = user_input.replace("```", "'''")
         # Bug fix: context 可能为 None（调用方传入 None 时 json.dumps 会崩溃）
         safe_context = context if context is not None else {}
-        prompt = f"""你是一个智能桌面助手，将用户的自然语言指令转换为 JSON 技能调用。
+
+        base_prompt = f"""你是一个智能桌面助手，将用户的自然语言指令转换为 JSON 技能调用。
 
 可用技能（括号内为必填参数）：
 {skill_descriptions}
@@ -280,6 +336,20 @@ class NLExecutor:
 用户说"open chrome" → {{"skill": "open_app", "parameters": {{"app_name": "chrome"}}}}
 用户说"你好" → {{"skill": "none", "parameters": {{}}}}
 
-只输出 JSON，不要包含任何解释文字：
-"""
-        return prompt
+只输出 JSON，不要包含任何解释文字："""
+
+        # 若是重试请求，追加错误诊断上下文
+        if retry_hint:
+            history = self.memory.build_context_summary(max_lines=4)
+            pattern_hint = self.memory.error_pattern_hint()
+            error_context = f"""
+
+【重试诊断】
+前次尝试失败：{retry_hint[:150]}
+执行历史摘要：
+{history}"""
+            if pattern_hint:
+                error_context += f"\n\n{pattern_hint}"
+            error_context += "\n请基于上述错误诊断，尝试选择不同的技能或修正参数。"
+            return base_prompt + error_context
+        return base_prompt

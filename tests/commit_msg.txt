@@ -1,0 +1,31 @@
+fix: security & bug fixes across 7 files
+
+[BUG] base_skill: validate_parameters 'any' type caused false ValueError
+  - _TYPE_MAP['any']=None, _TYPE_MAP.get() returned None for 'any' before
+    the continue check, triggering the 'Unknown type' ValueError
+  - Fix: check via key-not-in-_TYPE_MAP instead of value-is-None
+
+[BUG] claw_parser: ClawSkill.execute merged type-declaration dict into params
+  - params = self.parameters merged with kwargs injected type strings as
+    actual parameter values when kwargs lacked the key
+  - Fix: params = dict(kwargs) only
+
+[SEC] send_email: no length/content validation on recipient/subject/body
+  - Attacker-controlled LLM output could inject unlimited text via keyboard
+  - Fix: add empty-check + max-length guards (256/200/10000 chars)
+
+[SEC/RELIABILITY] rl/collector: save() had no error handling; no atomic write
+  - Added tmp-file + replace atomic write to prevent partial-write corruption
+  - Added OSError catch in load() for locked/unreadable files
+
+[SEC] nl_executor: _extract_json brace-matcher ignored chars inside strings
+  - JSON with brace chars in string values caused premature truncation
+  - Fix: state-machine parser tracking in_string and escape_next state
+
+[RACE] model_manager: set_model() had current_model=None window between
+  old model teardown and new model assignment
+  - Fix: construct new model first, then swap atomically, then free old
+
+[OPT] main.py: heavy RL/learning imports at module level caused import
+  failures on machines without torch/gymnasium installed
+  - Fix: moved imports inside args.learn/args.rl branches (lazy import)

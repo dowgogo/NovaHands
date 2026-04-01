@@ -1,0 +1,65 @@
+
+¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+  NovaHands ÐéÄâ²âÊÔÌ×¼þ
+  £¨ËùÓÐµÚÈý·½ÒÀÀµÒÑ Mock£¬ÎÞÐè°²×°ÈÎºÎ°ü£©
+¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+
+
+>> ÅäÖÃ¼ÓÔØÆ÷ (ConfigLoader)
+2026-03-25 14:11:33,808 - novahands - WARNING - Environment variable '_NH_MISSING_VAR' is not set. Related feature may not work correctly.
+
+>> ¼¼ÄÜ»ùÀà (BaseSkill)
+
+>> ¼¼ÄÜ¹ÜÀíÆ÷ (SkillManager)
+2026-03-25 14:11:33,933 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:33,936 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:11:33,942 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:33,944 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:11:33,946 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:33,946 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:11:33,949 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:33,949 - novahands - INFO - Loaded native skill: send_email
+
+>> ¿ØÖÆÆ÷ (Controller)
+
+>> °²È«ÊØÎÀ (SafeGuard)
+2026-03-25 14:11:34,089 - novahands - WARNING - App 'malicious.exe' not in whitelist
+
+>> ×ÔÈ»ÓïÑÔÖ´ÐÐÆ÷ (NLExecutor)
+2026-03-25 14:11:34,127 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:34,129 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:11:34,383 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:34,383 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:11:34,385 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:34,386 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:11:34,387 - novahands - INFO - Executed skill: open_app
+2026-03-25 14:11:34,388 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:34,388 - novahands - INFO - Loaded native skill: send_email
+
+>> ´ò¿ªÓ¦ÓÃ¼¼ÄÜ (OpenAppSkill)
+
+>> RL Ä£Äâ¿ØÖÆÆ÷ (MockController)
+
+>> RL ÑµÁ·»·¾³ (NovaHandsEnv)
+2026-03-25 14:11:34,403 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:34,403 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:11:34,405 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:34,405 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:11:34,407 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:34,407 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:11:34,410 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:34,412 - novahands - INFO - Loaded native skill: send_email
+2026-03-25 14:11:34,413 - novahands - INFO - Loaded native skill: open_app
+2026-03-25 14:11:34,413 - novahands - INFO - Loaded native skill: send_email
+
+>> Ïß³Ì°²È« (ThreadSafety)
+
+>> °²È«ÐÞ¸´ÑéÖ¤ (SecurityFixes)
+
+¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+  ×Ü¼Æ: 54 Ïî²âÊÔ
+  [92mÍ¨¹ý: 54[0m  [91mÊ§°Ü: 0[0m  [93m´íÎó: 0  Ìø¹ý: 0[0m
+
+  [1m[92m[OK] È«²¿²âÊÔÍ¨¹ý£¡ÏîÄ¿Âß¼­ÔËÐÐÕý³£¡£[0m
+¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+
