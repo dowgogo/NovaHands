@@ -104,19 +104,24 @@ async def execute(request: ExecuteRequest):
     if not executor or not controller:
         raise HTTPException(status_code=503, detail="Server not ready")
 
-    async with _execute_lock:
-        try:
-            # Bug fix: get_event_loop() 在 Python 3.10+ Deprecated，3.12 移除
-            # 在 async 上下文中应使用 get_running_loop()
+    # 安全：设置执行超时（60秒），防止恶意请求永久阻塞
+    try:
+        async with _execute_lock:
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: executor.execute(request.command, controller, **request.context)
+            await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: executor.execute(request.command, controller, **request.context)
+                ),
+                timeout=60.0
             )
             return {"status": "success"}
-        except Exception as e:
-            logger.error(f"API execution failed: {e}")
-            raise HTTPException(status_code=500, detail="Internal server error")
+    except asyncio.TimeoutError:
+        logger.error(f"API execution timed out for command: {request.command}")
+        raise HTTPException(status_code=408, detail="Execution timeout")
+    except Exception as e:
+        logger.error(f"API execution failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/skills", dependencies=[Depends(verify_api_key)])

@@ -34,6 +34,9 @@ _MCP_PROTOCOL_VERSION = "2024-11-05"
 _SERVER_NAME = "NovaHands"
 _SERVER_VERSION = "1.0.0"
 
+# 安全：最大请求体大小限制（10MB），防止 DoS 攻击
+_MAX_REQUEST_SIZE = 10 * 1024 * 1024
+
 
 class MCPHandler(BaseHTTPRequestHandler):
     """HTTP 请求处理器，实现 JSON-RPC 2.0 dispatch。"""
@@ -60,6 +63,14 @@ class MCPHandler(BaseHTTPRequestHandler):
             return
 
         length = int(self.headers.get("Content-Length", 0))
+        # 安全：拒绝超大请求（DoS 防护）
+        if length > _MAX_REQUEST_SIZE:
+            logger.warning(f"[MCP] Rejecting oversized request: {length} bytes")
+            self._send_json(
+                {"error": f"Request too large (max {_MAX_REQUEST_SIZE} bytes)"},
+                status=413
+            )
+            return
         body = self.rfile.read(length)
         try:
             req = json.loads(body)

@@ -40,8 +40,8 @@ class SkillEvolution:
         for pattern, support in patterns:
             if support >= 3:
                 # Bug fix: 原 int(time.time()) + len(skills) 在同一秒并发调用时可能重复
-                # 改用 uuid4 短哈希保证唯一性
-                skill_name = f"auto_{uuid.uuid4().hex[:8]}"
+                # 改用 uuid4 短哈希保证唯一性（[:12] 降低冲突概率）
+                skill_name = f"auto_{uuid.uuid4().hex[:12]}"
                 skill = GeneratedSkill(
                     name=skill_name,
                     description=f"Auto-generated from pattern with support {support}",

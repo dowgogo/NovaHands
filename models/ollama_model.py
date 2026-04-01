@@ -106,7 +106,11 @@ class OllamaModel(BaseModel):
         """检查 Ollama 服务是否可达（用于健康检查）。"""
         try:
             resp = requests.get(f"{self.base_url}/api/tags", timeout=5)
-            return resp.status_code == 200
+            if resp.status_code != 200:
+                return False
+            # 安全：验证 JSON 格式和包含 "models" 字段
+            data = resp.json()
+            return "models" in data
         except Exception:
             return False
 

@@ -7,7 +7,16 @@ from utils.logger import logger
 
 class Recognizer:
     def __init__(self, template_dir: str = None):
-        self.template_dir = template_dir or os.path.join(os.path.dirname(__file__), "..", "templates")
+        raw_path = template_dir or os.path.join(os.path.dirname(__file__), "..", "templates")
+        # 安全：路径规范化，防止路径遍历
+        self.template_dir = os.path.realpath(raw_path)
+        # 限制必须在项目目录内
+        project_root = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
+        if not self.template_dir.startswith(project_root):
+            raise ValueError(
+                f"Template directory must be within project root: {self.template_dir}\n"
+                f"Project root: {project_root}"
+            )
         if not os.path.exists(self.template_dir):
             os.makedirs(self.template_dir)
 

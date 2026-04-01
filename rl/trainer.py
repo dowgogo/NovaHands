@@ -117,10 +117,23 @@ class RLFineTuner:
 
         try:
             trainer.train()
-            # 修复：保存到可配置的绝对路径，并处理磁盘/权限异常
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-            self.lora_model.save_pretrained(str(self.output_dir))
-            logger.info(f"Training completed, LoRA weights saved to {self.output_dir}")
+            # 安全：使用临时目录 + 重命名实现原子写入
+            import tempfile
+            import shutil
+
+            temp_dir = tempfile.mkdtemp(prefix="lora_weights_")
+            try:
+                self.lora_model.save_pretrained(temp_dir)
+                # 移动到目标位置（原子操作）
+                if os.path.exists(self.output_dir):
+                    shutil.rmtree(self.output_dir)
+                shutil.move(temp_dir, str(self.output_dir))
+                logger.info(f"Training completed, LoRA weights saved to {self.output_dir}")
+            except Exception as e:
+                # 清理临时目录
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+                raise
         except OSError as e:
             logger.error(f"Failed to save LoRA weights: {e}")
             raise
