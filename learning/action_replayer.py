@@ -182,8 +182,12 @@ class ActionReplayer:
             contains = step.check_before.get("contains", "")
             return contains.lower() in current_app.lower()
         else:
-            logger.warning(f"Unknown check type: {check_type}")
-            return False  # FIX MEDIUM-1: unknown type should return False (deny for safety)
+            logger.warning(
+                f"Unknown check type: {check_type}. "
+                f"Step {step.index} will be skipped for safety. "
+                f"Known types: text_exists, window_title"
+            )
+            return False  # 安全默认：未知类型拒绝执行
 
     def _match_ui_element(self, step: ReplayStep) -> Optional[tuple]:
         """

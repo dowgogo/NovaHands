@@ -146,9 +146,20 @@ class NLExecutor:
                     f"Execution failed (attempt={attempt}): {error_str}\n"
                     f"Raw response: {resp_preview!r}"
                 )
+                # 修复：尝试从响应中提取 skill_name，失败时使用 "unknown"
+                recorded_skill = "unknown"
+                try:
+                    if response:
+                        json_str = self._extract_json(response)
+                        if json_str:
+                            skill_call = SkillCall.model_validate_json(json_str)
+                            recorded_skill = skill_call.skill
+                except Exception:
+                    pass  # 提取失败，使用默认值
+
                 # 记录失败到 memory
                 self.memory.add(ExecutionRecord(
-                    skill_name=skill_name,
+                    skill_name=recorded_skill,
                     parameters={},
                     success=False,
                     error_msg=error_str[:200],

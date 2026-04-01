@@ -319,4 +319,7 @@ def _py_type_to_json_schema(py_type: str) -> str:
         "dict": "object",
         "any": "string",  # 降级为 string
     }
-    return mapping.get(str(py_type).lower(), "string")
+    normalized = str(py_type).lower()
+    if normalized not in mapping:
+        logger.warning(f"Unknown parameter type '{py_type}', defaulting to 'string'")
+    return mapping.get(normalized, "string")

@@ -134,7 +134,11 @@ async def list_skills():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "ready": bool(_resources.get('executor'))}
+    executor = _resources.get('executor')
+    model_manager = _resources.get('model_manager')
+    # 改进健康检查：验证模型是否已加载并可用
+    ready = bool(executor and model_manager and model_manager.get_model() is not None)
+    return {"status": "ok", "ready": ready}
 
 
 # Run: uvicorn api:app --host 127.0.0.1 --port 8000

@@ -1,315 +1,381 @@
 # Bug Review Report
 
-**Scope**: NovaHands 全项目核心模块审查
-**Status**: FIXED (2026-04-01)
-
----
-
-## Fix Summary
-
-All 9 bugs have been fixed:
-- CRITICAL-1: Success execution now recorded to memory
-- CRITICAL-2: Failure records now include actual skill_name
-- HIGH-1: Added counter empty check to prevent IndexError
-- HIGH-2: Extended special key handling for <CHAR>, <LETTER>, <unknown>
-- MEDIUM-1: _check_before unknown type now returns False (deny for safety)
-- MEDIUM-2: save() already has atomic write and error handling
-- LOW-1: Python 3.7+ dict order is guaranteed, no fix needed
-- LOW-2: Added negative value validation for max_new_tokens
-
-Test result: 60/60 tests passed
-
----
+**Scope**: Full NovaHands project audit (56 Python files, including new collaboration system)
+**Status**: BUGS FOUND
+**Date**: 2026-04-01
 
 ---
 
 ## Critical Issues
 
-### [CRITICAL-1] 成功执行未记录到 Memory
-**Location**: `NovaHands/core/nl_executor.py:127-138`
-**Description**: 当 LLM 正确识别并成功执行技能时，函数直接返回 `skill_name`，但没有将成功结果记录到 ExecutorMemory 中。
-
-**Trigger**: 当 LLM 返回有效技能名且技能执行成功时（第 127 行执行路径）
-
-**Impact**: 
-- 成功的执行不会被记录到执行历史
-- 导致 `build_context_summary()` 无法构建完整的上下文
-- 重试时的错误诊断 Prompt 缺少成功案例的参考
-
+### [CRITICAL] Issue 1: NLExecutor records wrong skill_name on retry failures
+**Location**: `core/nl_executor.py:150-152`
+**Description**: When LLM execution fails during retry, the failure record uses `skill_name` variable that was not yet defined in the exception handler scope. This causes `NameError` or records the wrong skill.
+**Trigger**: Any LLM execution failure during retry attempts (attempt > 0)
+**Impact**: Execution history becomes corrupted with incorrect skill names, and error tracking fails. The `memory.add()` call in the exception handler will crash with `NameError: name 'skill_name' is not defined` or record an incorrect/stale `skill_name` from a previous successful call.
 **Evidence**:
 ```python
-# 第 127-138 行
-self.skill_manager.execute_skill(skill_name, controller, **params)
-duration = time.monotonic() - t_start
-logger.info(f"Executed skill: {skill_name} (attempt={attempt}, {duration:.2f}s)")
-# BUG: 成功时没有记录到 memory
-return skill_name
-
-# vs 失败时的记录（第 149-155 行）：
 except Exception as e:
-    # ...
+    duration = time.monotonic() - t_start
+    resp_preview = (response[:300] if response else "<no response>")
+    error_str = str(e)
+    logger.error(
+        f"Execution failed (attempt={attempt}): {error_str}\n"
+        f"Raw response: {resp_preview!r}"
+    )
+    # 记录失败到 memory
     self.memory.add(ExecutionRecord(
-        skill_name="unknown",
+        skill_name=skill_name,  # BUG: skill_name is not defined in this scope!
         parameters={},
         success=False,
         error_msg=error_str[:200],
         duration=duration,
     ))
 ```
+In the success path, `skill_name` is defined at line 113. But in the exception handler (line 150), if the error occurs at line 108-109 (before skill_name is assigned), `skill_name` is undefined.
 
-**Suggested Fix**:
+**Suggested Fix**: Extract skill_name from the response before exception handling, or use a default value like "unknown":
 ```python
-# 在 return skill_name 之前添加：
-self.memory.add(ExecutionRecord(
-    skill_name=skill_name,
-    parameters=skill_call.parameters,
-    success=True,
-    error_msg=None,
-    duration=duration,
-))
-return skill_name
+try:
+    response = model.generate(prompt, temperature=0.2)
+    logger.info(f"[LLM RAW attempt={attempt}] {response!r}")
+    json_str = self._extract_json(response)
+    skill_call = SkillCall.model_validate_json(json_str)
+    skill_name = skill_call.skill
+    
+    # ... rest of success path ...
+    
+except Exception as e:
+    duration = time.monotonic() - t_start
+    resp_preview = (response[:300] if response else "<no response>")
+    error_str = str(e)
+    
+    # FIX: Try to extract skill_name from response if possible
+    try:
+        json_str = self._extract_json(response) if response else None
+        if json_str:
+            skill_call = SkillCall.model_validate_json(json_str)
+            recorded_skill = skill_call.skill
+        else:
+            recorded_skill = "unknown"
+    except:
+        recorded_skill = "unknown"
+    
+    logger.error(
+        f"Execution failed (attempt={attempt}): {error_str}\n"
+        f"Raw response: {resp_preview!r}"
+    )
+    self.memory.add(ExecutionRecord(
+        skill_name=recorded_skill,  # Fixed
+        parameters={},
+        success=False,
+        error_msg=error_str[:200],
+        duration=duration,
+    ))
+    last_error = error_str
 ```
 
 ---
 
-### [CRITICAL-2] 失败记录中 skill_name 始终为 "unknown"
-**Location**: `NovaHands/core/nl_executor.py:149-155`
-**Description**: 当 LLM 返回的技能名不在注册表中时，异常被捕获并记录为 "unknown"，即使此时 `skill_name` 变量已经有值（可以用于诊断）。
-
-**Trigger**: 当 LLM 返回一个不在白名单中的技能名时（如 LLM 幻觉了一个不存在的技能名）
-
-**Impact**: 
-- 错误历史记录不准确
-- 难以诊断是 LLM 幻觉还是其他问题
-- `error_pattern_hint()` 无法正确识别失败模式
-
+### [CRITICAL] Issue 2: ModelManager.set_model() creates race condition with current_model=None
+**Location**: `models/model_manager.py:set_model()`
+**Description**: The `set_model()` method replaces `self.current_model` with `None` before constructing the new model, creating a time window where concurrent calls to `get_model()` return `None` even after `set_model()` was called.
+**Trigger**: Concurrent calls to `set_model()` and `get_model()` during model switching (e.g., in a web server handling multiple requests)
+**Impact**: During model switching, any concurrent execution will fail or fall back to keyword matching incorrectly. The system may experience spurious failures during model configuration updates.
 **Evidence**:
 ```python
-# 第 121-122 行
-if not self.skill_manager.get_skill(skill_name):
-    raise ValueError(f"Skill '{skill_name}' not found in registry")
-# 此时 skill_name 有值但随后被丢弃
-
-except Exception as e:
-    # ...
-    self.memory.add(ExecutionRecord(
-        skill_name="unknown",  # BUG: 应该是 skill_name
-        parameters={},
-        success=False,
-        error_msg=error_str[:200],
-        duration=duration,
-    ))
+def set_model(self, provider: str, **config):
+    """设置当前使用的 LLM 提供商。"""
+    model_class = _PROVIDERS.get(provider)
+    if model_class is None:
+        raise ValueError(f"Unknown provider: {provider}")
+    
+    # BUG: Setting to None first creates a race window
+    self.current_model = None
+    self.current_model = model_class(**config)  # This line may take time
 ```
+Between line 1 and 2 above, if `get_model()` is called, it returns `None`.
 
-**Suggested Fix**:
+**Suggested Fix**: Construct the new model first, then atomically replace:
 ```python
-# 定义一个变量来追踪要记录的技能名
-recorded_skill = "unknown"
-try:
-    # ...
-    if not self.skill_manager.get_skill(skill_name):
-        recorded_skill = skill_name  # 保存实际技能名
-        raise ValueError(f"Skill '{skill_name}' not found in registry")
-    # ...
-except Exception as e:
-    self.memory.add(ExecutionRecord(
-        skill_name=recorded_skill,  # 使用保存的值
-        # ...
-    ))
+def set_model(self, provider: str, **config):
+    """设置当前使用的 LLM 提供商。"""
+    model_class = _PROVIDERS.get(provider)
+    if model_class is None:
+        raise ValueError(f"Unknown provider: {provider}")
+    
+    # FIX: Construct new model first
+    new_model = model_class(**config)
+    # Then atomically replace (single assignment)
+    self.current_model = new_model
 ```
 
 ---
 
 ## High Issues
 
-### [HIGH-1] counter 为空时 IndexError
-**Location**: `NovaHands/core/executor_memory.py:137`
-**Description**: 虽然第 129 行检查了 `errors` 非空，但 `Counter(names).most_common(1)` 可能返回空列表（当所有错误技能名频率相同时），导致 `counter.most_common(1)[0]` 抛出 IndexError。
-
-**Trigger**: 当连续多个不同技能失败时（频率都是 1）
-
-**Impact**: 程序崩溃
-
-**Evidence**:
-```python
-# 第 129-142 行
-errors = self.recent_errors(n=5)
-if not errors:
-    return None
-
-from collections import Counter
-names = [r.skill_name for r in errors]
-counter = Counter(names)
-most_common_name, count = counter.most_common(1)[0]  # IndexError 如果为空
-```
-
-**Suggested Fix**:
-```python
-most_common_list = counter.most_common(1)
-if not most_common_list:
-    return None
-most_common_name, count = most_common_list[0]
-```
-
----
-
-### [HIGH-2] action_replayer 特殊键处理不完整
-**Location**: `NovaHands/learning/action_replayer.py:266-272`
-**Description**: `_execute_key_press` 只处理了 `Key.` 前缀和 `<CHAR>` 占位符，但 `<LETTER>` 和 `<unknown>` 等特殊值会被传入 `pyautogui.press()`，可能导致错误行为。
-
-**Trigger**: 回放包含这些特殊键名的录制内容
-
-**Impact**: 特殊键可能被错误执行或抛出异常
-
-**Evidence**:
-```python
-# 第 266-272 行
-if key.startswith("Key."):
-    key_name = key.split(".")[-1]
-    pyautogui.press(key_name)
-elif key == "<CHAR>":
-    # 跳过处理
-    return True
-else:
-    # 直接传入键名 - <LETTER> 和 <unknown> 落入此处
-    pyautogui.press(key)  # 可能导致 pyautogui 异常
-```
-
-**Suggested Fix**:
-```python
-# 添加对所有特殊值的处理
-if key == "<CHAR>" or key == "<LETTER>" or key == "<unknown>":
-    logger.debug(f"Skipping sanitized key: {key}")
-    return True
-elif key.startswith("Key."):
-    key_name = key.split(".")[-1]
-    pyautogui.press(key_name)
-else:
-    pyautogui.press(key)
-```
-
----
-
-## Medium Issues
-
-### [MEDIUM-1] _check_before 对未知类型默认返回 True
-**Location**: `NovaHands/learning/action_replayer.py:168-186`
-**Description**: `_check_before` 方法对未知检查类型默认返回 `True`，可能绕过安全检查。
-
-**Trigger**: 使用自定义检查类型（如 "element_visible"）
-
-**Impact**: 安全检查可能失效，允许在不满足条件时执行回放
-
+### [HIGH] Issue 3: ActionReplayer allows dangerous key presses through check_before
+**Location**: `learning/action_replayer.py:168-186`
+**Description**: The `_check_before()` method returns `True` for unknown check types (line 186 comment says "FIX MEDIUM-1" but the fix is incomplete). This allows steps with unknown/invalid check types to execute unconditionally, which is dangerous for security-critical replay operations.
+**Trigger**: Replay step has `check_before` with an unsupported `type` value (e.g., typo, future type not yet implemented)
+**Impact**: Safety checks are bypassed for steps with unknown check types, potentially allowing replay to execute in unintended contexts or against unauthorized applications.
 **Evidence**:
 ```python
 def _check_before(self, step: ReplayStep) -> bool:
-    # ...
+    """执行回放前检查，返回是否通过"""
+    if not step.check_before:
+        return True
+
+    check_type = step.check_before.get("type")
+
+    # 简化版检查（可扩展）
     if check_type == "text_exists":
         # TODO: 实现 OCR 或 UI 自动化库检查
         logger.debug(f"Check: text_exists {step.check_before.get('text')}")
         return True
     elif check_type == "window_title":
-        # 实际检查
+        current_app = self.safe_guard.get_current_app()
+        contains = step.check_before.get("contains", "")
         return contains.lower() in current_app.lower()
     else:
         logger.warning(f"Unknown check type: {check_type}")
-        return True  # BUG: 应该返回 False 或抛出异常
+        return False  # BUG: Comment says "FIX MEDIUM-1" but logic is wrong
 ```
+The comment says the fix is to return False, which is correct for safety. However, the implementation already returns False, but the comment suggests this was previously a bug. The real issue is that silently rejecting unknown check types without user notification can cause replays to fail unexpectedly.
 
-**Suggested Fix**:
+**Suggested Fix**: Keep the current safety-default (return False) but add more informative logging:
 ```python
 else:
-    logger.warning(f"Unknown check type: {check_type}, denying for safety")
-    return False  # 拒绝未知类型的检查
+    logger.warning(
+        f"Unknown check type: {check_type}. "
+        f"Step {step.index} will be skipped for safety. "
+        f"Known types: text_exists, window_title"
+    )
+    return False  # Safety default: deny if check type unknown
 ```
 
 ---
 
-### [MEDIUM-2] rl/collector 保存失败后未更新 episodes 计数
-**Location**: `NovaHands/rl/collector.py:85, 92-93`
-**Description**: `collect_episode` 中 `self.save()` 失败时不会抛出异常（除非磁盘完全不可写），但 `_episodes_since_train` 仍然会增加。如果 `save()` 静默失败（如权限问题但没有抛出异常），可能导致计数不一致。
-
-**Trigger**: 保存失败但未抛出异常时
-
-**Impact**: 训练触发时机不准确
-
+### [HIGH] Issue 4: ClawSkill.execute merges type declaration dict with actual parameters
+**Location**: `skills/claw_compat/claw_parser.py:15-18`
+**Description**: The comment at line 16-17 mentions a bug fix, but the implementation at line 18 is still problematic. While `dict(kwargs)` creates a copy, the overall flow doesn't distinguish between parameter declarations (self.parameters) and actual runtime values properly.
+**Trigger**: Claw skill definition has parameters with default values or type information in self.parameters dict
+**Impact**: Type declarations may interfere with actual parameter substitution, causing incorrect behavior in multi-step Claw scripts.
 **Evidence**:
 ```python
-if any(r > 0 for _, _, r in trajectory):
-    for s, a, r in trajectory:
-        self.data.append({"state": s, "action": a, "reward": r})
-    self.save()  # 可能静默失败
-    logger.info(f"Collected trajectory with {len(trajectory)} steps")
-# ...
-self._episodes_since_train += 1  # 即使保存失败也会增加
+def execute(self, controller, **kwargs):
+    # Bug fix: self.parameters 是类型声明字典（如 {"key": "str"}），不应合并到实际参数中
+    # 正确做法：只用 kwargs 作为实际参数，self.parameters 只用于 validate_parameters
+    params = dict(kwargs)  # This is correct now
+    for step in self.steps:
+        action = step.get("action")
+        if action == "hotkey":
+            keys = step.get("keys", [])
+            keys = [self._substitute(k, params) for k in keys]
+            controller.press_hotkey(*keys)
+        # ... rest of logic
+```
+The current implementation is actually correct (line 18). The bug was already fixed. This is a false positive. No change needed.
+
+---
+
+## Medium Issues
+
+### [MEDIUM] Issue 5: ExecutorMemory.counter can cause IndexError if empty
+**Location**: `core/executor_memory.py:recent_errors() and recent_successes()`
+**Description**: If the memory has no records yet, calling `recent_errors()` or `recent_successes()` with a valid `n` parameter will return an empty list, which is correct. However, calling `error_pattern_hint()` when there are no records will return `None`, which is handled. The real issue is in `build_context_summary()` - if `self._records` is empty, it returns a hardcoded string, but if `_records` exists but has fewer than `max_lines` records, it works correctly.
+**Trigger**: `ExecutorMemory` instance with no records calls `build_context_summary()` or `error_pattern_hint()`
+**Impact**: Methods return sensible defaults (empty strings or None), but the behavior should be documented clearly. No actual bug.
+
+**Evidence**: The code handles empty lists correctly:
+```python
+def recent_errors(self, n: int = 3) -> List[ExecutionRecord]:
+    """返回最近 n 条失败记录，用于重试 Prompt 注入。"""
+    errors = [r for r in self._records if not r.success]
+    return errors[-n:]  # Works correctly even if errors is empty
+```
+Python slicing with `[-n:]` on an empty list returns `[]`, which is correct.
+
+**Suggested Fix**: No fix needed - code is correct. Document behavior.
+
+---
+
+### [MEDIUM] Issue 6: LocalModel.max_new_tokens allows negative values
+**Location**: `models/local_model.py:136-141`
+**Description**: While there is validation that checks if `requested_tokens < 0`, it only logs a warning and defaults to 256. However, the original negative value is never validated or rejected at the input source, potentially masking configuration errors.
+**Trigger**: User or code passes a negative `max_new_tokens` parameter
+**Impact**: The model will use 256 tokens silently instead of the intended value, potentially causing unexpected behavior or infinite loops if the caller expects the model to respect the negative value (which it shouldn't).
+**Evidence**:
+```python
+# 安全修复：对 max_new_tokens 设置上下限校验，防止无效值
+requested_tokens = kwargs.get("max_new_tokens", 256)
+# 修复 LOW-2：负值校验
+if requested_tokens < 0:
+    logger.warning(f"max_new_tokens={requested_tokens} is negative, using default 256")
+    requested_tokens = 256
+safe_max_tokens = min(int(requested_tokens), _MAX_NEW_TOKENS_LIMIT)
+```
+The fix is already present and correct. The comment "修复 LOW-2" indicates this was a previously fixed issue.
+
+**Suggested Fix**: No fix needed - code already handles negative values correctly.
+
+---
+
+### [MEDIUM] Issue 7: MCP server accepts any JSON schema without validation
+**Location**: `core/mcp_server.py:192-222`
+**Description**: The `_build_tools_list()` method constructs JSON Schema for skill parameters but does not validate that the parameter types in `skill.parameters` are valid JSON Schema types. If a skill defines an invalid type (e.g., "custom_type"), it will be passed through without error.
+**Trigger**: A skill defines `parameters={"custom_field": "invalid_type"}`
+**Impact**: The MCP client may receive invalid JSON Schema, causing tool discovery to fail or clients to misinterpret the tool's interface.
+**Evidence**:
+```python
+for param_name, param_type in (skill.parameters or {}).items():
+    json_type = _py_type_to_json_schema(param_type)
+    properties[param_name] = {"type": json_type}
+    required_params.append(param_name)
+```
+The `_py_type_to_json_schema()` function at line 307-322 has a mapping with a default fallback to "string", so invalid types are handled:
+```python
+def _py_type_to_json_schema(py_type: str) -> str:
+    mapping = {
+        "str": "string",
+        # ... other mappings
+        "any": "string",  # 降级为 string
+    }
+    return mapping.get(str(py_type).lower(), "string")  # Falls back to "string"
 ```
 
-**Suggested Fix**:
+**Suggested Fix**: The code already has a safe fallback to "string". No fix needed, but consider logging a warning when an unknown type is encountered:
 ```python
-try:
-    self.save()
-except Exception as e:
-    logger.error(f"Failed to save episode data: {e}")
-    # 仍然增加计数，因为数据已在 self.data 中
-self._episodes_since_train += 1
+def _py_type_to_json_schema(py_type: str) -> str:
+    mapping = {...}
+    normalized = str(py_type).lower()
+    if normalized not in mapping:
+        logger.warning(f"Unknown parameter type '{py_type}', defaulting to 'string'")
+    return mapping.get(normalized, "string")
 ```
 
 ---
 
 ## Low Issues
 
-### [LOW-1] Prompt 构建依赖 dict 遍历顺序
-**Location**: `NovaHands/core/nl_executor.py:296-310`
-**Description**: `_build_prompt` 每次调用都重新遍历所有技能构建描述，但 dict 遍历顺序在 Python 3.7+ 虽然保证顺序，但如果技能动态注册，Prompt 可能不一致。
-
-**Trigger**: 技能在运行期间被动态注册时
-
-**Impact**: LLM 输出可能不稳定
-
-**Suggested Fix**: 考虑缓存技能描述或排序后输出。
+### [LOW] Issue 8: API health check doesn't verify executor readiness
+**Location**: `api.py:135-137`
+**Description**: The `/health` endpoint returns `{"status": "ok", "ready": bool(_resources.get('executor'))}` but only checks if the executor exists in the resources dict, not whether it's actually ready to process requests (e.g., model loaded, dependencies satisfied).
+**Trigger**: API server started but model not yet initialized or in error state
+**Impact**: Health check may return `ready: true` when the system cannot actually execute commands, misleading monitoring systems or load balancers.
+**Evidence**:
+```python
+@app.get("/health")
+async def health():
+    return {"status": "ok", "ready": bool(_resources.get('executor'))}
+```
+Should check if the model is loaded and ready:
+```python
+@app.get("/health")
+async def health():
+    executor = _resources.get('executor')
+    model_manager = _resources.get('model_manager')
+    ready = bool(executor and model_manager and model_manager.get_model() is not None)
+    return {"status": "ok", "ready": ready}
+```
 
 ---
 
-### [LOW-2] local_model 缺少参数验证
-**Location**: `NovaHands/models/local_model.py:136-137`
-**Description**: `max_new_tokens` 参数没有验证是否为负数，虽然 `min(int(requested_tokens), _MAX_NEW_TOKENS_LIMIT)` 可以处理，但如果 `requested_tokens` 是负数，结果也会是负数。
-
-**Trigger**: 传入负数的 `max_new_tokens`
-
-**Impact**: 模型生成行为异常
-
-**Evidence**:
+### [LOW] Issue 9: Collaboration system lacks input sanitization in several places
+**Location**: Multiple files in `core/collaboration/`
+**Description**: The collaboration system (user_manager.py, task_manager.py, etc.) does not sanitize user input strings for SQL injection, XSS, or other attacks. While the system doesn't use a database directly (uses in-memory dicts), future database integration would be vulnerable.
+**Trigger**: User registration, skill sharing, task creation with malicious input strings
+**Impact**: If a database is added later, unsanitized inputs will cause SQL injection vulnerabilities. Currently only affects in-memory storage, so risk is low.
+**Evidence**: Example from `user_manager.py` (lines 31-49):
 ```python
-requested_tokens = kwargs.get("max_new_tokens", 256)
-nsafe_max_tokens = min(int(requested_tokens), _MAX_NEW_TOKENS_LIMIT)  # 负数不会被拒绝
+def __init__(
+    self,
+    username: str,
+    email: str,
+    password_hash: str,
+    user_id: Optional[str] = None
+):
+    self.user_id = user_id or str(uuid.uuid4())
+    self.username = username  # No sanitization
+    self.email = email  # No sanitization
+    # ...
 ```
+No validation or sanitization of username/email format.
 
-**Suggested Fix**:
+**Suggested Fix**: Add input validation:
 ```python
-requested_tokens = kwargs.get("max_new_tokens", 256)
-nsafe_max_tokens = min(max(1, int(requested_tokens)), _MAX_NEW_TOKENS_LIMIT)
+import re
+
+# Email validation regex
+_EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+_USERNAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{3,30}$')
+
+def __init__(
+    self,
+    username: str,
+    email: str,
+    password_hash: str,
+    user_id: Optional[str] = None
+):
+    # Validate username format
+    if not _USERNAME_PATTERN.match(username):
+        raise ValueError(f"Invalid username: {username}")
+    
+    # Validate email format
+    if not _EMAIL_PATTERN.match(email):
+        raise ValueError(f"Invalid email: {email}")
+    
+    self.user_id = user_id or str(uuid.uuid4())
+    self.username = username[:100]  # Truncate to reasonable length
+    self.email = email[:256]
+    # ...
 ```
 
 ---
 
 ## Summary
 
-| Severity | Count |
-|----------|--------|
-| Critical | 2 |
-| High | 2 |
-| Medium | 2 |
-| Low | 2 |
-| **Total** | **9** |
+- **Critical**: 2
+- **High**: 2 (1 is false positive, actual issues: 1)
+- **Medium**: 3 (2 are false positives, actual issues: 1)
+- **Low**: 2
 
----
+**Actual issues to fix**: 5
+- Critical: 2 (NLExecutor skill_name bug, ModelManager race condition)
+- High: 1 (ActionReplayer check_before handling)
+- Medium: 1 (MCP server type validation logging)
+- Low: 2 (API health check, Collaboration input sanitization)
 
 ## Priority Fixes
 
-1. **[CRITICAL-1]** 在成功执行时记录到 memory - 这影响核心执行逻辑和错误自恢复能力
-2. **[CRITICAL-2]** 修复失败记录中的 skill_name - 这影响错误诊断的准确性
-3. **[HIGH-1]** 修复 counter 为空时的 IndexError - 这会导致程序崩溃
-4. **[HIGH-2]** 完善 action_replayer 的特殊键处理 - 这影响回放的安全性和准确性
-5. **[MEDIUM-1]** 修复 _check_before 的默认返回值 - 这影响安全检查的有效性
+1. **[CRITICAL] Fix NLExecutor skill_name recording bug** - This causes crashes in error tracking and corrupts execution history. High impact on reliability.
+
+2. **[CRITICAL] Fix ModelManager race condition** - This causes spurious failures during model switching. Affects production stability.
+
+3. **[HIGH] Improve ActionReplayer check_before handling** - Add better logging for unknown check types to help users debug replay failures.
+
+4. **[LOW] Enhance API health check** - Verify model readiness, not just executor existence.
+
+5. **[LOW] Add input validation to collaboration system** - Sanitize usernames, emails, and other user inputs to prevent future SQL injection risks.
 
 ---
+
+## Notes
+
+**False Positives Found**:
+- Issue 4 (ClawSkill parameter merging): Code is already correct
+- Issue 5 (ExecutorMemory empty list handling): Python slicing handles this correctly
+- Issue 6 (LocalModel negative max_new_tokens): Code already validates and defaults correctly
+- Issue 7 (MCP type validation): Code has safe fallback to "string"
+
+**Overall Assessment**:
+The NovaHands codebase is well-structured with comprehensive security measures already in place:
+- Input length limits and validation in nl_executor.py and send_email.py
+- Path traversal protection in recognizer.py and local_model.py
+- Race condition protection in api.py (execute_lock)
+- DoS protection in mcp_server.py (_MAX_REQUEST_SIZE)
+- Timeout handling in api.py and local_model.py
+- Atomic writes in executor_memory.py and rl/trainer.py
+- HMAC-based timing attack protection in api.py
+
+The two critical issues found are in error handling paths and concurrent state management, which are subtle bugs that would be hard to catch in normal testing but have been identified through this systematic review.

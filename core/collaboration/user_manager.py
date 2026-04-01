@@ -5,6 +5,7 @@
 """
 
 import uuid
+import re
 from datetime import datetime
 from typing import List, Dict, Optional
 from enum import Enum
@@ -25,9 +26,14 @@ class TeamPlan(Enum):
     ENTERPRISE = "enterprise"  # 企业版（无限人数）
 
 
+# 输入验证正则表达式
+_USERNAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{3,30}$')
+_EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+
+
 class User:
     """用户类"""
-    
+
     def __init__(
         self,
         username: str,
@@ -35,9 +41,17 @@ class User:
         password_hash: str,
         user_id: Optional[str] = None
     ):
+        # 输入验证：用户名格式
+        if not _USERNAME_PATTERN.match(username):
+            raise ValueError(f"Invalid username: {username} (must be 3-30 alphanumeric chars, underscores, hyphens)")
+
+        # 输入验证：邮箱格式
+        if not _EMAIL_PATTERN.match(email):
+            raise ValueError(f"Invalid email: {email}")
+
         self.user_id = user_id or str(uuid.uuid4())
-        self.username = username
-        self.email = email
+        self.username = username[:100]  # 限制长度
+        self.email = email[:256]  # 限制长度
         self.password_hash = password_hash
         self.role = UserRole.MEMBER
         self.created_at = datetime.now()
